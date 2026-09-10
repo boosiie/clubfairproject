@@ -1,61 +1,65 @@
-# Type anything. Watch it fall.
+# Walk around. Build anything.
 
-A club fair booth demo. Someone types *"a bowling ball made of jello"*, the model
-returns a small JSON object — shape, size, density, bounciness, colour, label —
-and it drops into a shared 2D physics world that never resets.
+A club fair booth demo. A walkable 2D amusement park with twelve empty plots.
+You walk a character down the midway, stand in a plot, type *"a statue of my
+chemistry teacher"*, and the model returns a small JSON structure that drops in
+and stands there.
 
-By hour two the screen is a disaster pile of everything the last eighty people
-summoned. That's the hook: people walking past see chaos on a big screen and
-want to add to it, then stay to watch their thing get crushed by the next
-person's thing.
+The park never resets. By the end of the day it is a row of everything the crowd
+built, and unlike a single pile, twelve separate plots stay readable all
+afternoon.
 
 ```
 npm install
 npm start            # http://localhost:3000
 ```
 
-No API key yet? It still runs. Without one it serves from a 32-object offline
+No API key yet? It still runs. Without one it serves from a 16-structure offline
 pack, which is also exactly what happens when the venue wifi dies mid-fair.
 
 For live generation, copy `.env.example` to `.env` and add an
 `ANTHROPIC_API_KEY`.
 
+**Controls:** `A`/`D` or the arrow keys to walk, `Space` to jump, `Enter` to
+build in the plot you are standing in.
+
 ---
 
 ## Why this shape of demo
 
-**Zero read time.** The result is motion, not paragraphs. Nobody at a club fair
-reads three sentences of model output.
+**Zero read time.** The result is a thing you can see, not paragraphs. Nobody at
+a club fair reads three sentences of model output.
 
-**It composes.** Person #40's contribution lands on person #12's. The world
-persisting is what makes people stay.
+**It composes, and it stays legible.** Person #40 builds next door to person
+#12. A shared pile turns to mush by hour two; a midway of numbered plots does
+not, and people can still find the thing they made.
 
 **Constrained output is the moderation.** The model is handed exactly one tool
 and forced to call it. It cannot write a sentence — the whole output channel is
-seven numbers, an enum, a hex colour, and a 28-character label. A student typing
-something crude gets a grey rectangle. There is nowhere for the model to be
-inappropriate because it isn't writing prose.
+a few clamped numbers per part, an enum, hex colours, and a 30-character label.
+A student typing something crude gets a grey block.
 
 That last point is the one worth understanding before you run this in front of a
 dean, so it's spelled out below.
 
 ---
 
-## How the safety story actually works
+## How the safety story works
 
-Four layers, in order:
+Five layers, in order:
 
-1. **The schema** (`public/js/spec.js`). The tool has fixed fields with fixed
-   types. There is no free-text field except `label`.
-2. **Clamping.** Every number is coerced into a hard range. Nothing is ever
-   rejected — out-of-range values are clamped, so the endpoint always returns
-   something spawnable. `label` is stripped to `[a-zA-Z0-9 '-.!?&]` and cut to
-   28 characters.
+1. **The schema** (`public/js/spec.js`). One to six parts, each with a fixed set
+   of typed fields. There is no free-text field except `label`.
+2. **Clamping.** Every number is coerced into a hard range, the part count is
+   capped, and oversized structures are scaled to fit their plot. Nothing is
+   ever rejected — the endpoint always returns something buildable. `label` is
+   stripped to `[a-zA-Z0-9 '-.!?&]` and cut to 30 characters.
 3. **The blocklist** (`server/moderation.js`), run twice: once on the typed
    prompt *before* the API call, once on the returned label after. Blocked input
-   still spawns — a plain grey box labelled "redacted". No error, no scolding,
-   no reaction. A boring grey box is the correct punishment.
-4. **Rendering.** The label reaches the page through `textContent` and a canvas
+   still builds — a plain grey block labelled "redacted". No error, no scolding,
+   no reaction. A boring grey block is the correct punishment.
+4. **The real-person policy** — see below.
+5. **Rendering.** The label reaches the page through `textContent` and a canvas
    `fillText`, never `innerHTML`.
 
 **Prompt injection isn't a real risk here**, and it's worth knowing why: a
@@ -64,53 +68,73 @@ influence the label — the one field with a length cap, a character filter, and
 blocklist in front of it. There's no path from the prompt to arbitrary text on
 screen.
 
+### Statues of real people
+
+Students will ask for statues of politicians. They will also ask for statues of
+their teachers and each other, which is the part that actually generates
+complaints.
+
+A wordlist can't solve this — you can't enumerate every public figure, let alone
+every teacher at your school. So the model classifies the subject in the same
+forced tool call it uses to build (`object`, `creature`, `character`,
+`real_person`), and `REAL_PEOPLE` in `.env` decides what happens:
+
+| `REAL_PEOPLE` | What a real person gets |
+| --- | --- |
+| `allow` (default) | Built as asked, under the name typed |
+| `generic` | The same statue, renamed "a statue of someone" |
+| `block` | A grey block, same as a blocked word |
+
+Default is `allow` because that is what this booth was asked for. If your
+advisor would rather not have named statues of real people on a screen in a
+school gym, `generic` keeps the joke and drops the name. The classification
+comes from a small model and won't be perfect — treat it as a strong filter, not
+a guarantee.
+
 ### Tune the blocklist before you go
 
 The shipped list is short, deliberately incomplete, and matches whole words so
-that "class project" and "a bowling ball" still work. Add your own terms in
+that "a statue of my class president" still works. Add your own terms in
 `server/blocklist.local.txt` (one per line, `#` for comments). That file is
 gitignored, so you can tune it for your school without publishing the list.
 
-It errs toward blocking. A few names and idioms get a grey box — "Dick Van Dyke"
-is blocked, and there's a test asserting that so the tradeoff stays visible
-rather than being a surprise. That's the right direction to err at a booth, and
-the cost is one boring object.
+It errs toward blocking. A few names and idioms get a grey block — "Dick Van
+Dyke" is blocked, and there's a test asserting that so the tradeoff stays
+visible rather than being a surprise. That's the right direction to err at a
+school booth, and the cost is one boring exhibit.
 
 ---
 
 ## Booth logistics
 
-Things that determine whether this works in a gym, roughly in order of how much
-they matter:
-
 - **Big external monitor or projector**, laptop as the keyboard station. The
-  screen is your advertising. Press `F` for fullscreen.
+  screen is your advertising.
 - **Assume the wifi dies.** It will. Everything needed is on the laptop:
   Matter.js is served from `node_modules`, not a CDN, and the offline pack is
   fetched once at startup and held in memory. When the network drops mid-fair,
-  the sandbox keeps working and shows a small "offline" pill. Nobody sees an
-  error screen. Rehearse this path with `npm run mock`.
+  the park keeps working and shows a small "offline" pill. Nobody sees an error
+  screen. Rehearse this path with `npm run mock`.
 - **The preset buttons matter more than you'd think.** Roughly half of booth
-  traffic won't type. Six one-tap prompts are along the bottom — edit them in
+  traffic won't type. Six one-tap prompts sit under the input — edit them in
   `public/index.html`.
-- **One-line sign, big font: "Type anything. Watch it fall."** Not "Explore
+- **One-line sign, big font: "Walk around. Build anything."** Not "Explore
   Generative AI." The headline on screen matches, so the sign and the screen
   reinforce each other.
-- **Signup sheet or QR right next to the screen.** The whole point is
-  conversion. Put your club name in `.brand__mark` in `public/index.html`, or
-  drop a logo image in its place.
+- **Signup sheet or QR right next to the screen.** Put your club name in
+  `.brand__mark` in `public/index.html`, or drop a logo image in its place.
 
 ### Attract mode
 
-After 25 seconds of nobody touching the keyboard, the sandbox starts dropping
-objects from the offline pack on its own, and hides the mouse cursor. A still
-screen advertises nothing. These are free — attract mode never calls the API.
+After 30 seconds with nobody touching the keyboard, the character strolls the
+midway on its own and fills empty plots from the pack, so a passer-by sees a
+world being built rather than a form. These are free — attract mode never calls
+the API.
 
 ### Cost and rate limiting
 
-Haiku, not Opus — a four-second wait kills a booth, and `max_tokens` is capped
-at 400 because the response is one tool call. A busy day is a few hundred calls
-and lunch money.
+Haiku, not Opus — a four-second wait kills a booth. A structure is a bigger
+response than a single object, so `max_tokens` is 1200, but a busy day is still
+a few hundred calls and lunch money.
 
 Three guards, all in `.env`:
 
@@ -136,31 +160,55 @@ npm run pregenerate        # ~40 Haiku calls, a few cents
 npm test                   # confirm the new pack survives normalization
 ```
 
-Then the offline and online paths produce the same flavour of object, and nobody
-can tell the difference when the wifi drops.
-
 ---
 
-## The physics, and two things that will bite you
+## The physics, and the things that will bite you
 
-**Mass ratios.** Matter.js is a sequential-impulse solver. Push mass ratios past
-roughly 1000:1 and heavy bodies punch straight through light ones and tunnel out
-of the world. The allowed density and size ranges multiply out to about
-17000:1, so `world.js` clamps the resulting *mass* into a band after the body is
-built. An anvil still crushes a balloon; it just stops deleting it from the
-universe.
+Most of the work in `park.js` is not "make it fall" — Matter.js does that. It is
+the handful of details that decide whether the booth survives an afternoon
+unattended.
 
-**"Never resets" still needs a cap.** 900 sleeping bodies is 9fps. The pile is
-capped at 140 live objects; past that the oldest fade out and stop colliding, so
-they drop away through the floor and the pile settles into the gap. The pile
-stays, the churn is visible, and the frame rate holds. `SUMMONED` keeps counting
-forever — that's the number people care about.
+**Parts are welded, not stacked.** A structure becomes one rigid compound body,
+so a statue holds its shape and stands. A stack of loose boxes collapses the
+instant it lands. It can still topple as a whole, which is the part people stay
+to watch.
 
-Two smaller things worth knowing if you change the rendering: only the newest 12
-objects and anything genuinely large keep their labels, because labelling all
-140 is both unreadable *and* the single most expensive part of the frame
-(removing it took a stress test from 28fps to 61fps). And the floor sits above
-the composer, so the pile never lands behind the input box.
+**Mass ratios.** Matter is a sequential-impulse solver; past roughly 1000:1,
+heavy bodies punch through light ones and tunnel out of the world. The allowed
+density and size ranges multiply out well past that, so mass is clamped into a
+band after the body is built.
+
+**Fences don't stop people.** The plot fences exist to keep a toppling statue
+out of the neighbour's lot. They're in a collision category the walker ignores —
+otherwise you can't walk down your own midway, which is exactly the bug this
+had first.
+
+**You can't be crushed by your own build.** Exhibits land in the middle of the
+plot, which is where the person who asked for it is standing. A new structure
+ignores the walker for the first couple of seconds, then starts colliding once
+it has settled. There's also a rescue: if you're pushing against nothing with
+something resting on your head, you get lifted out. Nobody is standing behind
+the booth to un-wedge a character.
+
+**Anchored things are bolted down after they land, not before.** Making a
+structure static at the moment it's created leaves it hanging in mid-air
+forever.
+
+**Polygons need two corrections.** Matter builds them with a vertex pointing
+right, so every roof, cone and rocket nose comes out on its side — a quarter
+turn minus one step puts a flat edge on the bottom for any number of sides. And
+a polygon is shorter than it is wide, so measuring it as a square box makes
+pyramids hover and roofs float off their walls. Every part is seated by its
+bounding box so `offsetY` means the same thing for all shapes.
+
+**The horizon sits high, on purpose.** The prompt is in the middle of the
+screen, so exhibits need to grow into the sky band above it. Put the horizon low
+and every statue is built behind the input box.
+
+**Twelve plots, four exhibits each.** Past that the oldest in *that plot* fades
+out and stops colliding, so it drops away and the plot settles. The park stays;
+each plot stays readable. `BUILT TODAY` keeps counting forever — that's the
+number people care about.
 
 ---
 
@@ -169,15 +217,15 @@ the composer, so the pile never lands behind the input box.
 ```
 server/
   index.js        Express, one endpoint, rate limits. Never returns an error.
-  claude.js       The forced-tool-use call. Haiku, 400 max_tokens, 5s timeout.
+  claude.js       The forced-tool-use call. Haiku, 1200 max_tokens, 7s timeout.
   moderation.js   Blocklist. Word matching, leetspeak folding, padding detection.
 public/
   index.html      The booth screen. Club name and presets live here.
   styles.css      Big-screen typography.
-  js/spec.js      The schema, the clamps. Imported by server AND browser.
-  js/world.js     Matter.js world, culling, labels.
+  js/spec.js      The schema, the clamps, the geometry. Server AND browser.
+  js/park.js      Matter.js world, plots, camera, the walking character.
   js/pack.js      Offline keyword matching.
-  js/main.js      Wiring, attract mode, offline fallback.
+  js/main.js      Wiring, controls, attract mode, offline fallback.
   data/           The offline pack.
 scripts/
   pregenerate.js  Refill the pack from the model.
@@ -185,7 +233,7 @@ test/
 ```
 
 `spec.js` and `pack.js` are imported by both the server and the browser, so a
-spec can't be clamped one way on the server and another way in the sandbox.
+structure can't be clamped one way on the server and another way in the park.
 
 ## Tests
 
@@ -193,7 +241,9 @@ spec can't be clamped one way on the server and another way in the sandbox.
 npm test
 ```
 
-16 tests, no key and no network needed. They cover the clamps (including hostile
-input — nulls, NaN, prose in the label field), the blocklist in both directions,
-and the offline pack. Every object in the pack is checked to survive
-normalization unchanged, which catches a bad hand-edit immediately.
+22 tests, no key and no network needed. They cover the clamps (including hostile
+input — nulls, NaN, fifty parts, prose in the label field), the structure
+geometry that keeps builds sitting on the ground and inside their plot, the
+blocklist in both directions, and the offline pack. Every structure in the pack
+is checked to survive normalization unchanged and to not be silently scaled,
+which catches a bad hand-edit immediately.

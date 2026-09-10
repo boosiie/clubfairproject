@@ -153,17 +153,22 @@ export function screen(text) {
   return { blocked: false };
 }
 
-/** The object a blocked prompt gets. Boring on purpose. */
-export const REDACTED_SPEC = {
-  shape: 'rectangle',
-  width: 110,
-  height: 70,
-  density: 0.004,
-  restitution: 0.1,
-  friction: 0.6,
-  sides: 4,
-  color: '#8f8f8f',
+/** The exhibit a blocked prompt gets. Boring on purpose. */
+export const REDACTED_STRUCTURE = {
   label: 'redacted',
+  subject: 'object',
+  anchored: false,
+  density: 0.006,
+  restitution: 0.05,
+  parts: [
+    { shape: 'rectangle', width: 130, height: 90, offsetX: 0, offsetY: 45, rotation: 0, sides: 4, color: '#8f8f8f' },
+  ],
 };
+
+/**
+ * What a real-person exhibit becomes under REAL_PEOPLE=generic: the structure
+ * the model built, under a name that identifies nobody.
+ */
+export const ANONYMOUS_LABEL = 'a statue of someone';
 
 export const blocklistSize = rawWords.size + SUBSTRINGS.length;

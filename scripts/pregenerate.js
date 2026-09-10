@@ -4,10 +4,10 @@
  * The pack that ships is hand-authored so a fresh clone works with no API key.
  * Run this the night before the fair, on wifi you trust, to replace it with
  * real model output - then the offline path and the online path produce the
- * same flavour of object and nobody can tell when the venue wifi dies.
+ * same flavour of structure and nobody can tell when the venue wifi dies.
  *
  *   npm run pregenerate                 # regenerate from the built-in prompts
- *   npm run pregenerate -- --merge      # keep existing objects, add new ones
+ *   npm run pregenerate -- --merge      # keep existing structures, add new ones
  *
  * Roughly 40 Haiku calls with a ~250 token prompt and a ~120 token response:
  * a few cents, and you only do it once.
@@ -17,31 +17,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalizeSpec } from '../public/js/spec.js';
+import { normalizeStructure } from '../public/js/spec.js';
 import { screen } from '../server/moderation.js';
-import { generateSpec, describeError, isConfigured, MODEL } from '../server/claude.js';
+import { generateStructure, describeError, isConfigured, MODEL } from '../server/claude.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const target = path.join(root, 'public/data/fallback.json');
 
 /**
- * Prompts chosen to span the physical range - light and heavy, bouncy and dead,
- * huge and tiny - so the pack can answer most of what a crowd types.
+ * Prompts chosen to cover what a crowd actually types at a park booth: rides,
+ * architecture, creatures, food, and the generic "a statue of <someone>" that
+ * every second person asks for.
  */
 const PROMPTS = [
-  'a bowling ball', 'a bowling ball made of jello', 'a trampoline', 'an anvil',
-  'an anvil the size of a car', 'a grand piano', 'a rubber duck', 'a beach ball',
-  'a brick', 'a helium balloon', 'a watermelon', 'a car', 'a refrigerator',
-  'a slice of pizza', 'a cannonball', 'a feather', 'a cinder block',
-  'a basketball', 'a sofa', 'a dumbbell', 'an ice cube', 'a wooden log',
-  'a car tire', 'a bank safe', 'an egg', 'a marshmallow', 'a boulder',
-  'a textbook', 'a traffic cone', 'a bale of hay', 'a superball', 'a pencil',
-  'a donut', 'a bathtub', 'a stack of pancakes', 'a bouncy castle',
-  'a shopping cart', 'a filing cabinet', 'a giant gummy bear', 'a wrecking ball',
+  'a statue', 'a statue of a person', 'a marble bust on a pedestal',
+  'a ferris wheel', 'a carousel', 'a roller coaster', 'a big top circus tent',
+  'a bouncy castle', 'a haunted house', 'a lighthouse', 'a clock tower',
+  'a castle', 'a pyramid', 'a windmill', 'a giant robot', 'a dragon',
+  'a dinosaur', 'a giant cat', 'a friendly monster', 'a rocket ship',
+  'a UFO', 'a giant ice cream cone', 'a hot dog stand', 'a pizza slice',
+  'a snack stand', 'a big tree', 'a cactus', 'a fountain', 'a wrecking ball',
+  'an arcade cabinet', 'a vending machine', 'a school bus', 'a food truck',
+  'a giant rubber duck', 'a treehouse', 'a water slide', 'a bandstand',
+  'a scoreboard', 'a giant chess piece', 'a goofy little guy',
 ];
 
-/** Keywords for the offline matcher, so "a bowling ball" still finds the bowling ball. */
-const STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'made', 'giant', 'stack', 'bale']);
+/** Keywords for the offline matcher, so "a ferris wheel" still finds the ferris wheel. */
+const STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'made', 'giant', 'big', 'little', 'friendly']);
 
 function keywordsFor(prompt, label) {
   const words = `${prompt} ${label}`
@@ -58,16 +60,16 @@ async function main() {
   }
 
   const merge = process.argv.includes('--merge');
-  const existing = merge ? JSON.parse(fs.readFileSync(target, 'utf8')).objects : [];
-  const objects = [...existing];
+  const existing = merge ? JSON.parse(fs.readFileSync(target, 'utf8')).structures : [];
+  const structures = [...existing];
   let failures = 0;
 
-  console.log(`Generating ${PROMPTS.length} objects with ${MODEL}...\n`);
+  console.log(`Generating ${PROMPTS.length} structures with ${MODEL}...\n`);
 
   for (const prompt of PROMPTS) {
     try {
-      const { spec } = await generateSpec(prompt);
-      const normalized = normalizeSpec(spec);
+      const { structure } = await generateStructure(prompt);
+      const normalized = normalizeStructure(structure);
 
       // The pack ships in the repo and plays unattended in attract mode, so
       // anything questionable is dropped rather than shipped.
@@ -76,15 +78,15 @@ async function main() {
         continue;
       }
 
-      objects.push({ keywords: keywordsFor(prompt, normalized.label), ...normalized });
-      console.log(`  ok    ${prompt} -> ${normalized.label} (${normalized.shape})`);
+      structures.push({ keywords: keywordsFor(prompt, normalized.label), ...normalized });
+      console.log(`  ok    ${prompt} -> ${normalized.label} (${normalized.parts.length} parts)`);
     } catch (err) {
       failures += 1;
       console.log(`  fail  ${prompt} -> ${describeError(err)}`);
     }
   }
 
-  if (!objects.length) {
+  if (!structures.length) {
     console.error('\nNothing generated - leaving the existing pack alone.');
     process.exit(1);
   }
@@ -94,14 +96,14 @@ async function main() {
     `${JSON.stringify(
       {
         note: `Generated by scripts/pregenerate.js with ${MODEL} on ${new Date().toISOString().slice(0, 10)}.`,
-        objects,
+        structures,
       },
       null,
       2,
     )}\n`,
   );
 
-  console.log(`\nWrote ${objects.length} objects to public/data/fallback.json (${failures} failed).`);
+  console.log(`\nWrote ${structures.length} structures to public/data/fallback.json (${failures} failed).`);
   console.log('Run `npm test` to confirm they all survive normalization.');
 }
 
