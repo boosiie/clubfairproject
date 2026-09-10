@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Type anything. Watch it fall.</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧱</text></svg>"
+    />
+  </head>
+  <body>
+    <!-- The physics canvas is injected here by Matter.Render. -->
+    <div id="world" aria-hidden="true"></div>
+
+    <header class="hud hud--top">
+      <div class="brand">
+        <span class="brand__mark" id="club-mark">AI CLUB</span>
+        <h1 class="brand__line">Type anything. Watch it&nbsp;fall.</h1>
+      </div>
+      <dl class="counters">
+        <div><dt>summoned</dt><dd id="stat-total">0</dd></div>
+        <div><dt>in the pile</dt><dd id="stat-live">0</dd></div>
+      </dl>
+    </header>
+
+    <aside class="feed" id="feed" aria-live="polite">
+      <h2 class="feed__title">just dropped</h2>
+      <ul class="feed__list" id="feed-list"></ul>
+    </aside>
+
+    <footer class="hud hud--bottom">
+      <form class="composer" id="composer" autocomplete="off">
+        <input
+          id="prompt"
+          class="composer__input"
+          type="text"
+          name="prompt"
+          maxlength="140"
+          placeholder="a bowling ball made of jello"
+          aria-label="Describe an object to drop into the world"
+          spellcheck="false"
+        />
+        <button class="composer__go" type="submit" id="go">Drop it</button>
+      </form>
+
+      <!-- Roughly half of booth traffic will not type. These are for them. -->
+      <div class="presets" id="presets">
+        <button type="button" data-prompt="a bowling ball made of jello">bowling ball made of jello</button>
+        <button type="button" data-prompt="an anvil the size of a car">anvil the size of a car</button>
+        <button type="button" data-prompt="a trampoline">trampoline</button>
+        <button type="button" data-prompt="a grand piano">grand piano</button>
+        <button type="button" data-prompt="a giant rubber duck">giant rubber duck</button>
+        <button type="button" data-prompt="a beach ball full of concrete">beach ball full of concrete</button>
+      </div>
+    </footer>
+
+    <div class="pill" id="pill" hidden></div>
+
+    <script src="/vendor/matter.min.js"></script>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>

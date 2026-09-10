@@ -1,0 +1,8 @@
+node_modules/
+.env
+.DS_Store
+npm-debug.log*
+
+# Your own additions to the blocklist. Kept out of git so you can tune it for
+# your school without publishing the list.
+server/blocklist.local.txt

@@ -1,0 +1,170 @@
+/**
+ * spec.js - the single source of truth for what the model is allowed to emit.
+ *
+ * Imported by BOTH the Node server and the browser, so a spec can never be
+ * clamped one way on the server and another way in the sandbox.
+ *
+ * The safety story of this whole project lives here: the model's only channel
+ * to the screen is an object matching this schema. Every field is validated and
+ * clamped. Nothing the model returns is ever rendered as free text except
+ * `label`, which is length-capped, character-filtered, and blocklisted.
+ */
+
+export const SHAPES = ['rectangle', 'circle', 'polygon', 'capsule'];
+
+/** Hard bounds. Anything outside is clamped, never rejected - we always spawn something. */
+export const LIMITS = {
+  width: { min: 16, max: 420, fallback: 90 },
+  height: { min: 16, max: 420, fallback: 90 },
+  density: { min: 0.0005, max: 0.02, fallback: 0.001 },
+  restitution: { min: 0, max: 0.92, fallback: 0.35 },
+  friction: { min: 0, max: 1, fallback: 0.4 },
+  sides: { min: 3, max: 8, fallback: 5 },
+  labelMaxLength: 28,
+};
+
+/**
+ * Mass band, enforced after the body exists (see world.js).
+ *
+ * Matter.js is a sequential-impulse solver: mass ratios beyond roughly 1000:1
+ * make heavy bodies punch through light ones and tunnel out of the world. The
+ * density and size ranges above can multiply out to ~17000:1, so we clamp the
+ * resulting mass into this band instead. An anvil still crushes a balloon; it
+ * just stops deleting it from the universe.
+ */
+export const MASS_BAND = { min: 2, max: 600 };
+
+/** Cap on any dimension, as a fraction of world height. Keeps one object from eating the screen. */
+export const MAX_DIMENSION_FRACTION = 0.42;
+
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+const LABEL_ALLOWED = /[^a-zA-Z0-9 '\-.!?&]/g;
+
+const NAMED_COLORS = {
+  red: '#e5484d', orange: '#f76b15', yellow: '#ffe629', green: '#46a758',
+  blue: '#3e63dd', purple: '#8e4ec6', pink: '#e93d82', brown: '#ad7f58',
+  black: '#3c3c3c', white: '#f5f5f5', grey: '#8f8f8f', gray: '#8f8f8f',
+  cyan: '#00b8d4', lime: '#bdee63', gold: '#ffc53d', silver: '#c8c8c8',
+};
+
+function clamp(n, min, max) {
+  return n < min ? min : n > max ? max : n;
+}
+
+function num(value, limit) {
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  if (!Number.isFinite(n)) return limit.fallback;
+  return clamp(n, limit.min, limit.max);
+}
+
+/** Deterministic pleasant colour from a string, so a bad `color` still gives variety. */
+export function colorFromString(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  return hslToHex(Math.abs(hash) % 360, 62, 58);
+}
+
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))));
+  return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+function relativeLuminance(hex) {
+  const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lin = channels.map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+/**
+ * Lift near-black colours so they stay visible against the dark sandbox
+ * background. A projector in a bright gym eats them entirely.
+ *
+ * The threshold is deliberately low. Set it much higher and it starts "fixing"
+ * perfectly readable slates and navies, which is worse than leaving them alone.
+ */
+const MIN_LUMINANCE = 0.035;
+
+function ensureVisible(hex) {
+  let out = hex;
+  for (let i = 0; i < 12 && relativeLuminance(out) < MIN_LUMINANCE; i++) {
+    out = '#' + [1, 3, 5]
+      .map((idx) => Math.min(255, Math.round(parseInt(out.slice(idx, idx + 2), 16) * 1.25 + 16)))
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return out;
+}
+
+export function normalizeColor(value, seed = 'seed') {
+  if (typeof value === 'string') {
+    const raw = value.trim().toLowerCase();
+    if (NAMED_COLORS[raw]) return ensureVisible(NAMED_COLORS[raw]);
+    const short = /^#?([0-9a-f]{3})$/.exec(raw);
+    if (short) {
+      const [r, g, b] = short[1].split('');
+      return ensureVisible(`#${r}${r}${g}${g}${b}${b}`);
+    }
+    const long = /^#?([0-9a-f]{6})$/.exec(raw);
+    if (long) return ensureVisible(`#${long[1]}`);
+  }
+  return ensureVisible(colorFromString(seed));
+}
+
+/**
+ * Strip a label down to plain printable text. This runs before the blocklist,
+ * so punctuation-padded spellings cannot slip past the word matcher.
+ */
+export function sanitizeLabel(value, fallback = 'mystery object') {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value
+    .replace(CONTROL_CHARS, ' ')
+    .replace(LABEL_ALLOWED, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, LIMITS.labelMaxLength)
+    .trim();
+  return cleaned.length ? cleaned : fallback;
+}
+
+/**
+ * Coerce anything - a model tool call, a cached fallback object, a hand-written
+ * literal - into a spec that is safe to hand to the physics world.
+ * Never throws, never returns null, always returns something spawnable.
+ */
+export function normalizeSpec(input) {
+  const raw = input && typeof input === 'object' ? input : {};
+  const shape = SHAPES.includes(raw.shape) ? raw.shape : 'rectangle';
+  const label = sanitizeLabel(raw.label);
+
+  const spec = {
+    shape,
+    width: Math.round(num(raw.width, LIMITS.width)),
+    height: Math.round(num(raw.height, LIMITS.height)),
+    density: num(raw.density, LIMITS.density),
+    restitution: num(raw.restitution, LIMITS.restitution),
+    friction: num(raw.friction, LIMITS.friction),
+    sides: Math.round(num(raw.sides, LIMITS.sides)),
+    color: normalizeColor(raw.color, label),
+    label,
+  };
+
+  // Circles and regular polygons are defined by one dimension; keep them round.
+  if (shape === 'circle' || shape === 'polygon') spec.height = spec.width;
+  return spec;
+}
+
+/** Scale a spec down so no dimension exceeds a fraction of the world height. */
+export function fitToWorld(spec, worldHeight) {
+  const cap = Math.max(24, worldHeight * MAX_DIMENSION_FRACTION);
+  const largest = Math.max(spec.width, spec.height);
+  if (largest <= cap) return spec;
+  const scale = cap / largest;
+  return {
+    ...spec,
+    width: Math.max(LIMITS.width.min, Math.round(spec.width * scale)),
+    height: Math.max(LIMITS.height.min, Math.round(spec.height * scale)),
+  };
+}

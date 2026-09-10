@@ -1,0 +1,352 @@
+/*
+ * styles.css - big-screen first.
+ *
+ * Everything here assumes the page is being read from ten feet away by someone
+ * walking past, not from eighteen inches away by the person typing. Type is
+ * large, contrast is high, and the chrome stays out of the physics.
+ */
+
+:root {
+  --bg: #0b0e17;
+  --bg-grid: #141a2b;
+  --ink: #f4f6fb;
+  --ink-dim: #8b95ad;
+  --accent: #ffd23f;
+  --accent-ink: #12151f;
+  --surface: rgba(16, 21, 34, 0.82);
+  --border: rgba(255, 255, 255, 0.1);
+  --radius: 14px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background-color: var(--bg);
+  /* A faint grid gives the falling objects a sense of scale and depth. */
+  background-image:
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 64px 64px;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#world {
+  position: fixed;
+  inset: 0;
+}
+
+#world canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- shared chrome ---------- */
+
+.hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  gap: 20px;
+  padding: clamp(14px, 2vw, 28px);
+  pointer-events: none;
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+.hud--top {
+  top: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+/* By hour two the pile reaches the top of the screen. A scrim keeps the club
+   name and the headline readable against whatever colour is behind them. */
+.hud--top::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to bottom, rgba(11, 14, 23, 0.92), rgba(11, 14, 23, 0));
+  pointer-events: none;
+}
+
+.hud--bottom {
+  bottom: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ---------- masthead ---------- */
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand__mark {
+  /* Swap this for your club's name, or drop a logo <img> in its place. */
+  font-size: clamp(0.8rem, 1.1vw, 1rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.brand__line {
+  margin: 0;
+  font-size: clamp(1.4rem, 3.2vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.6);
+}
+
+.counters {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  text-align: right;
+}
+
+.counters div {
+  min-width: 108px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+}
+
+.counters dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.counters dd {
+  margin: 2px 0 0;
+  font-size: clamp(1.4rem, 2.4vw, 2.2rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- recent summons ---------- */
+
+.feed {
+  position: fixed;
+  left: clamp(14px, 2vw, 28px);
+  top: 42%;
+  z-index: 2;
+  width: min(260px, 24vw);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.feed__title {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(11, 14, 23, 0.93);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.feed__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feed__list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* More opaque than the rest of the chrome - this one sits directly over the
+     pile, and a translucent card on top of a bright object is unreadable. */
+  background: rgba(11, 14, 23, 0.93);
+  font-size: clamp(0.82rem, 1.1vw, 1rem);
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  animation: slide-in 0.35s ease-out;
+}
+
+/* De-emphasise older entries by dimming the text, not the card. Fading the
+   whole card lets the pile behind it show through and nothing stays readable. */
+.feed__list li:nth-child(n + 4) {
+  color: var(--ink-dim);
+}
+
+.feed__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex: none;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+/* ---------- composer ---------- */
+
+.composer {
+  display: flex;
+  gap: 10px;
+  width: min(760px, 92vw);
+}
+
+.composer__input {
+  flex: 1;
+  min-width: 0;
+  padding: clamp(14px, 1.7vw, 20px) clamp(16px, 2vw, 24px);
+  font-family: inherit;
+  font-size: clamp(1.05rem, 1.9vw, 1.6rem);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(8px);
+}
+
+.composer__input::placeholder {
+  color: var(--ink-dim);
+}
+
+.composer__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.composer__go {
+  padding: 0 clamp(20px, 2.6vw, 34px);
+  font-family: inherit;
+  font-size: clamp(1rem, 1.6vw, 1.4rem);
+  font-weight: 800;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.composer__go:hover {
+  transform: translateY(-2px);
+}
+
+.composer__go:disabled {
+  opacity: 0.55;
+  cursor: progress;
+  transform: none;
+}
+
+/* ---------- preset buttons ---------- */
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: min(880px, 94vw);
+}
+
+.presets button {
+  padding: 9px 15px;
+  font-family: inherit;
+  font-size: clamp(0.8rem, 1.1vw, 1rem);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.presets button:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+/* ---------- status pill ---------- */
+
+.pill {
+  position: fixed;
+  right: clamp(14px, 2vw, 28px);
+  bottom: clamp(14px, 2vw, 28px);
+  z-index: 3;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  backdrop-filter: blur(8px);
+}
+
+/* Hide the cursor once nobody has touched the station for a while - the screen
+   is advertising at that point, not a computer someone is using. */
+body.idle {
+  cursor: none;
+}
+
+@media (max-width: 720px) {
+  .feed {
+    display: none;
+  }
+
+  .counters div {
+    min-width: 84px;
+    padding: 8px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed__list li {
+    animation: none;
+  }
+
+  .composer__go:hover,
+  .presets button:hover {
+    transform: none;
+  }
+}

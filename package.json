@@ -1,0 +1,22 @@
+{
+  "name": "clubfair-physics-sandbox",
+  "version": "1.0.0",
+  "description": "Club fair booth demo: students type anything, the model returns a constrained JSON object spec, and it falls into a shared 2D physics world that never resets.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --env-file-if-exists=.env --watch server/index.js",
+    "mock": "MOCK=1 node server/index.js",
+    "pregenerate": "node --env-file-if-exists=.env scripts/pregenerate.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "express": "^5.2.1",
+    "matter-js": "^0.20.0"
+  },
+  "private": true
+}
