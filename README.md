@@ -316,6 +316,41 @@ given. You cannot see that on green. On white you can: it came out `#d2dadd`.
 colour it was built in. The sky term is near-white too, because it is the
 floor's main light source and a blue light on a white floor makes a blue floor.
 
+**The keyboard belongs to one mode at a time.** Walking mode: WASD, Shift,
+Space, V, arrows. Typing mode: every key is a letter, and nothing moves. Enter
+crosses between them in both directions and Escape always gets you out — at a
+booth there has to be one key that works from any state a visitor has managed
+to reach. Which set of hints is showing along the bottom *is* the mode
+indicator.
+
+Sharing the keyboard does not work, and the attempt to share it was a real bug:
+the rule used to be "letters move you while the box is empty", so the D in
+"dragon" arrived while the box was still empty, got read as a movement key, and
+was swallowed before the box ever saw it. You strafed right instead of typing a
+letter. Any rule based on what is already in the box has that hole at the first
+keystroke, and the first keystroke is the one that matters.
+
+**Nothing may keep focus after a build.** A preset button that holds focus turns
+the next Space — which is jump — into a second press of itself. One
+`document.activeElement?.blur()` covers the box, the presets and Build it.
+
+**The chrome is bottom-anchored, and there is a test for it.** The prompt used
+to sit at a fixed percentage of the screen height while the key hints were
+anchored to the bottom, so the gap between them shrank with the window and they
+collided at 1366×768 — which is the commonest school-laptop panel there is.
+`scratchpad/overlap.mjs` walks five viewport sizes in both modes and asserts no
+two pieces of chrome intersect and nothing spills off an edge.
+
+**Exhibit signs are kept off the chrome and off each other.** A sign is hidden
+rather than moved when it lands on the header or the composer — there is nowhere
+else for it to go, and a label printed across the club's name makes the screen
+look broken from the far side of a gym. Signs that would overprint each other
+stack upward instead, nearest-first, so the one you are standing next to keeps
+its place. The collision box is a fixed approximation on purpose: measuring the
+real node means reading layout in the same frame we write transforms, which
+forces a reflow per sign per frame, and label soup was already the FPS
+bottleneck once.
+
 **Exhibits must have depth.** The whole point of 3D is walking round the back,
 and a flat cutout looks fine from the road and absurd from the side. There is a
 test asserting every archetype is at least 0.6m deep.

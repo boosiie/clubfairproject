@@ -116,6 +116,44 @@ body {
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.7);
 }
 
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 26px);
+}
+
+/* Muted on purpose. It is the only destructive control on the screen and it
+   should never be the thing a visitor's eye lands on. */
+.clear {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  /* Muted, but not invisible - whoever is running the booth has to be able to
+     find it across a noisy gym without being told where it is. */
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #aab4c8;
+  font: inherit;
+  font-size: clamp(0.7rem, 0.85vw, 0.82rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.clear:hover {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Armed. Loud, because the next press is the one that cannot be undone. */
+.clear--armed {
+  background: #c23b3b;
+  border-color: #e26a6a;
+  color: #fff;
+}
+
 .counters {
   display: flex;
   gap: 10px;
@@ -156,11 +194,16 @@ body {
 .stage {
   position: fixed;
   left: 50%;
-  /* On the path, just below the horizon. Exhibits grow upward into the sky
-     band above, so the prompt never covers the thing being built. */
-  top: 74%;
+  /* Anchored UP from the controls rather than down from the top of the screen.
+     A percentage worked at 900px tall and collided with the key hints on a
+     shorter laptop, because the controls are bottom-anchored and the stage was
+     not - so the gap between them shrank with the window. */
+  /* Enough room for the controls at their tallest - they wrap to two lines
+     somewhere around 1400px wide, which is exactly where a school laptop sits,
+     and a clamp tuned to the one-line height collides there. */
+  bottom: clamp(126px, 16vh, 172px);
   z-index: 3;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -307,11 +350,38 @@ body {
   opacity: 0.25;
 }
 
+/* Typing mode has to stay readable - it is the one state a visitor can get
+   stuck in, and the way out is written in it. */
+body.typing .controls {
+  opacity: 1;
+}
+
+.controls__set {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: clamp(12px, 2vw, 26px);
+}
+
+.controls__set--type,
+body.typing .controls__set--walk {
+  display: none;
+}
+
+body.typing .controls__set--type {
+  display: flex;
+}
+
 .controls__group {
   display: flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+
+.controls__group--lead {
+  color: var(--accent);
 }
 
 kbd {

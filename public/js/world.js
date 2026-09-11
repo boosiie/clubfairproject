@@ -577,22 +577,40 @@ export class World {
     return exhibit;
   }
 
+  /** Start an exhibit fading out. `delay` staggers a group of them. */
+  retire(exhibit, delay = 0) {
+    if (exhibit.removing) return;
+    exhibit.removing = true;
+    exhibit.removeAt = this.clock.elapsedTime + FADE_SECONDS + delay;
+    exhibit.group.traverse((node) => {
+      if (!node.isMesh) return;
+      // Cloned so fading this copy does not fade every other exhibit sharing
+      // the material. The block face is an array of six, so handle both.
+      const fade = (material) => Object.assign(material.clone(), { transparent: true });
+      node.material = Array.isArray(node.material)
+        ? node.material.map(fade)
+        : fade(node.material);
+    });
+  }
+
   /** Keep each plot legible: past its capacity, the oldest exhibit fades out. */
   cullPlot(index) {
     const live = this.contentsOf(index);
-    for (let i = 0; i < live.length - PLOT_CAPACITY; i++) {
-      live[i].removing = true;
-      live[i].removeAt = this.clock.elapsedTime + FADE_SECONDS;
-      live[i].group.traverse((node) => {
-        if (!node.isMesh) return;
-        // Cloned so fading this copy does not fade every other exhibit sharing
-        // the material. The block face is an array of six, so handle both.
-        const fade = (material) => Object.assign(material.clone(), { transparent: true });
-        node.material = Array.isArray(node.material)
-          ? node.material.map(fade)
-          : fade(node.material);
-      });
-    }
+    for (let i = 0; i < live.length - PLOT_CAPACITY; i++) this.retire(live[i]);
+  }
+
+  /**
+   * Empty the park.
+   *
+   * Staggered rather than all at once: a whole park vanishing on one frame
+   * reads as a crash, and a sweep reads as something you did on purpose. The
+   * counters are deliberately NOT reset - "built today" is a tally of what the
+   * booth has done all day, and clearing the floor does not undo any of it.
+   */
+  clearAll() {
+    const live = this.exhibits.filter((exhibit) => !exhibit.removing);
+    live.forEach((exhibit, i) => this.retire(exhibit, i * 0.05));
+    return live.length;
   }
 
   /* ---------- per-frame ---------- */
@@ -644,7 +662,9 @@ export class World {
 
       if (exhibit.removing) {
         const remaining = Math.max(0, exhibit.removeAt - now);
-        const opacity = remaining / FADE_SECONDS;
+        // Clamped because a staggered clear sets removeAt further out than one
+        // fade, and the extra time would otherwise come through as opacity > 1.
+        const opacity = Math.min(1, remaining / FADE_SECONDS);
         exhibit.group.traverse((node) => {
           if (node.isMesh) for (const material of eachMaterial(node)) material.opacity = opacity;
         });
