@@ -39,11 +39,23 @@ and third person, `Enter` to build on the plot you are standing on.
 bundler - an import map in `index.html` is what lets three's GLTFLoader resolve
 its own `import "three"`.
 
-**Exhibits are built from boxes, spheres, cylinders and cones.** That is the
-Roblox palette, and it is a deliberate choice over a catalogue of downloaded
-models: a catalogue means the fortieth person gets the same tree as the twelfth,
-and "type anything" stops being true. Primitives keep every build unique and
-match the blocky look.
+**Exhibits are sculpted out of cubes**, on a 16x18x16 grid, the way a
+MagicaVoxel or Minecraft build works. It is a deliberate choice over a catalogue
+of downloaded models: a catalogue means the fortieth person gets the same tree
+as the twelfth, and "type anything" stops being true.
+
+It is also a deliberate choice over the primitive solids this used to use. Eight
+boxes and spheres is a ceiling rather than a style - no amount of prompting gets
+a dragon out of them - where a few hundred cubes have room for a snout, a spine
+and a pair of glowing eyes. The model paints the sculpture one layer at a time,
+and paints only the right half of anything with a left and a right: that halves
+the tokens, and symmetry is most of what separates a creature from a pile of
+cubes.
+
+Primitive solids survive as an intermediate form. The offline generator and the
+canned blocks still describe themselves in boxes and cylinders, and those are
+rasterised into the same grid, so there is one thing to render and no visible
+second tier of quality when the wifi drops.
 
 **First person by default**, with `V` to drop back to third. You are in the
 park, at eye height, and a six-metre dragon landing next to you reads as six
@@ -90,13 +102,14 @@ dean, so it's spelled out below.
 
 Five layers, in order:
 
-1. **The schema** (`public/js/spec.js`). One to eight parts, each with a fixed
-   set of typed fields - three sizes, three offsets, three rotations, a shape
-   enum and a hex colour. There is no free-text field except `label`.
-2. **Clamping.** Every number is coerced into a hard range, the part count is
-   capped, and oversized structures are scaled to fit their plot. Nothing is
-   ever rejected — the endpoint always returns something buildable. `label` is
-   stripped to `[a-zA-Z0-9 '-.!?&]` and cut to 30 characters.
+1. **The schema** (`public/js/spec.js`). A palette of up to ten hex colours,
+   each keyed to one character, and layers of those characters on a fixed grid.
+   There is no free-text field except `label`.
+2. **Clamping.** Every colour is normalised, every cube is snapped to the grid
+   and anything outside it is dropped, and the sculpture is centred and seated
+   on the ground. Nothing is ever rejected — the endpoint always returns
+   something buildable. `label` is stripped to `[a-zA-Z0-9 '-.!?&]` and cut to
+   30 characters.
 3. **The blocklist** (`server/moderation.js`), run twice: once on the typed
    prompt *before* the API call, once on the returned label after. Blocked input
    still builds — a plain grey block labelled "redacted". No error, no scolding,
@@ -327,12 +340,13 @@ about as long as the drop takes, and any deliberate input cancels the turn.
 ```
 server/
   index.js        Express, one endpoint, rate limits. Never returns an error.
-  claude.js       The forced-tool-use call. Haiku, 2000 max_tokens, 7s timeout.
+  claude.js       The forced-tool-use call. Haiku, 8000 max_tokens, 20s timeout.
   moderation.js   Blocklist. Word matching, leetspeak folding, padding detection.
 public/
   index.html      The booth screen. Club name and presets live here.
   styles.css      Big-screen typography.
-  js/spec.js      The schema, the clamps, the geometry. Server AND browser.
+  js/spec.js      The schema, the clamps, the palette. Server AND browser.
+  js/voxel.js     The grid: layers in, cubes out. Rasterising, culling, shading.
   js/world.js     three.js scene, plots, camera, avatar, collision.
   js/offline.js   The local generator: prompt -> archetype, size, material.
   js/main.js      Wiring, controls, attract mode, offline fallback.
@@ -342,7 +356,7 @@ scripts/
 test/
 ```
 
-`spec.js` and `offline.js` are imported by both the server and the browser, so a
+`spec.js`, `voxel.js` and `offline.js` are imported by both the server and the browser, so a
 structure cannot be clamped one way on the server and another way in the world.
 
 ## Tests

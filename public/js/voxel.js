@@ -270,6 +270,10 @@ function shadeHex(hex, factor) {
  * nothing. A cube with open sky above it is lifted slightly on top of that,
  * which reads as sunlight and picks out the silhouette against the park.
  *
+ * Each cube also carries `rise`, its height as a fraction of the sculpture's
+ * own height. That is what lets the park assemble a build from the ground up
+ * without the renderer having to measure anything.
+ *
  * @param {number[]} voxels - flat [x, y, z, paletteIndex, ...]
  * @param {Array<{color:string, glow:boolean}>} palette
  * @returns {{solid: Array, glow: Array}} instances in metres, ready to draw
@@ -284,6 +288,11 @@ export function shadeVoxels(voxels, palette) {
 
   const solid = [];
   const glow = [];
+
+  // Measured over every cube, including the buried ones that are never drawn,
+  // so `rise` means height in the sculpture rather than height among survivors.
+  let topY = 0;
+  for (let i = 1; i < voxels.length; i += 4) topY = Math.max(topY, voxels[i]);
 
   for (let v = 0; v < voxels.length; v += 4) {
     const x = voxels[v], y = voxels[v + 1], z = voxels[v + 2];
@@ -315,6 +324,7 @@ export function shadeVoxels(voxels, palette) {
       x: at.x,
       y: at.y,
       z: at.z,
+      rise: topY ? y / topY : 0,
       color: entry.glow ? entry.color : shadeHex(entry.color, shade),
     });
   }

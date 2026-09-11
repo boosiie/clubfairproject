@@ -172,6 +172,28 @@ test('buried cubes are never drawn, and glowing ones are never shaded', () => {
   assert.ok(glow.glow.every((cell) => cell.color === '#00ff00'), 'a glowing cube was shaded');
 });
 
+test('cubes carry their height, so a sculpture can assemble from the ground up', () => {
+  const rows = ['AA'];
+  const built = normalizeStructure({
+    label: 'column', symmetry: 'none',
+    palette: [{ key: 'A', color: '#ff0000', glow: false }],
+    layers: [{ y: 0, rows }, { y: 1, rows }, { y: 2, rows }, { y: 3, rows }],
+  });
+  const drawn = shadeVoxels(built.voxels, built.palette);
+
+  const byHeight = new Map();
+  for (const cell of drawn.solid) byHeight.set(Math.round(cell.y * 1000), cell.rise);
+  const heights = [...byHeight.keys()].sort((a, b) => a - b);
+
+  assert.equal(byHeight.get(heights[0]), 0, 'the ground layer does not start first');
+  assert.equal(byHeight.get(heights[heights.length - 1]), 1, 'the top layer does not finish last');
+  // Strictly increasing, or the build would not read as sweeping upward.
+  const rises = heights.map((h) => byHeight.get(h));
+  for (let i = 1; i < rises.length; i++) {
+    assert.ok(rises[i] > rises[i - 1], `layer ${i} does not start after layer ${i - 1}`);
+  }
+});
+
 test('voxel bounds are measured in metres, not in grid steps', () => {
   const built = sculpture({ symmetry: 'none', layers: [{ y: 0, rows: ['AA'] }, { y: 1, rows: ['AA'] }] });
   const bounds = voxelBounds(built.voxels);

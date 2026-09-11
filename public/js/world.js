@@ -32,6 +32,20 @@ const GRAVITY = 26;
 const FADE_SECONDS = 0.9;
 const HIGHLIGHT_SECONDS = 6;
 
+/** How long a sculpture takes to assemble itself on the way down. */
+const MATERIALISE_SECONDS = 1.15;
+/** Share of that spent staggering the layers; the rest is one cube's own pop. */
+const MATERIALISE_STAGGER = 0.72;
+
+/** Idle life, once it has landed. Small on purpose - a park, not a rave. */
+const BOB_HEIGHT = 0.055;
+const SWAY_ANGLE = 0.05;
+/** Creatures pace this far from where they landed, and no further. */
+const WANDER_RADIUS = 1.3;
+const WANDER_SPEED = 0.55;
+const WANDER_TURN_RATE = 2.4;
+const SUBJECTS_THAT_WANDER = new Set(['creature', 'character']);
+
 const WALK_SPEED = 5.2;
 const RUN_SPEED = 9;
 const JUMP_SPEED = 8.4;
@@ -489,7 +503,12 @@ export class World {
     const spread = PLOT_SIZE * 0.27;
     const nudge = [[0, 0], [-spread, spread], [spread, -spread], [spread, spread]][taken % 4];
 
-    group.position.set(at.x + nudge[0], DROP_HEIGHT, at.z + nudge[1]);
+    // A sculpture builds itself where it stands. Dropping it from nine metres
+    // put the whole assemble above the top of the screen, and watching three
+    // hundred cubes print themselves from the ground up is the better entrance
+    // anyway - the fall was the right one for a solid block, not for this.
+    const assembles = Boolean(!meme && fitted.voxels?.length);
+    group.position.set(at.x + nudge[0], assembles ? 0 : DROP_HEIGHT, at.z + nudge[1]);
     // A random spin is fine for a statue and useless for something you have to
     // read, so the block turns its face to whoever typed it. Local +Z becomes
     // (sin y, 0, cos y), which is why the arguments are this way round.
@@ -511,12 +530,20 @@ export class World {
       // The footprint is measured before the group is turned, so turn it too.
       // Collision is axis-aligned, and anything much wider than it is deep - a
       // bus, a wall, the block - is walk-straight-through without this.
-      halfWidth: (bounds.width * cos + bounds.depth * sin) / 2,
-      halfDepth: (bounds.width * sin + bounds.depth * cos) / 2,
+      // Padded by the sway, so an exhibit rocking on the spot can never rock
+      // its own corner through somebody standing next to it.
+      halfWidth: (bounds.width * cos + bounds.depth * sin) / 2 + SWAY_ANGLE * bounds.depth,
+      halfDepth: (bounds.width * sin + bounds.depth * cos) / 2 + SWAY_ANGLE * bounds.width,
       restY: 0,
+      voxelMeshes: group.children.filter((child) => child.isInstancedMesh),
+      materialised: false,
+      idle: idleFor(fitted, group, at, nudge),
       velocityY: 0,
-      landed: false,
+      landed: assembles,
       bounces: 0,
+      // Bounciness has nothing to fall, so it becomes the overshoot on each
+      // cube as it pops in: stone barely twitches, jello arrives wobbling.
+      pop: 1 + fitted.bounciness * 2.6,
       born: this.clock.elapsedTime,
       removing: false,
     };
@@ -574,6 +601,10 @@ export class World {
     for (let i = this.exhibits.length - 1; i >= 0; i--) {
       const exhibit = this.exhibits[i];
 
+      // It builds itself from the ground layer up, so the wait for the model
+      // is the show rather than a gap before it.
+      if (!exhibit.materialised) stepMaterialise(exhibit, now - exhibit.born);
+
       if (!exhibit.landed) {
         exhibit.velocityY -= GRAVITY * delta;
         exhibit.group.position.y += exhibit.velocityY * delta;
@@ -591,6 +622,10 @@ export class World {
             exhibit.velocityY = 0;
           }
         }
+      } else if (exhibit.materialised && !exhibit.removing) {
+        // Only once it has finished printing. Breathing and pacing while half
+        // its cubes are still arriving reads as the build sliding off its feet.
+        stepIdle(exhibit, delta, now);
       }
 
       if (exhibit.removing) {
@@ -840,6 +875,118 @@ export class World {
  * but it catches the light along every edge and is the difference between
  * reading as a sculpture built out of blocks and reading as one melted lump.
  */
+/* ---------- motion ---------- */
+
+// Hoisted: these run over every cube of an assembling sculpture, every frame.
+const SCRATCH_MATRIX = new THREE.Matrix4();
+
+/** A pop that overshoots, so each cube arrives with a snap rather than a fade. */
+function easeOutBack(t, back) {
+  const u = t - 1;
+  return 1 + (back + 1) * u * u * u + back * u * u;
+}
+
+/**
+ * Assemble a sculpture out of nothing, lowest cubes first.
+ *
+ * Each cube is staggered by its own height, so the build sweeps up the model
+ * like something being printed. That is the whole point: the seconds a
+ * sculpture costs to generate stop being a spinner and become the thing people
+ * at the booth stand and watch.
+ *
+ * Only ever runs on an exhibit younger than MATERIALISE_SECONDS, so at most one
+ * or two in the park are rewriting their matrices at a time.
+ */
+function stepMaterialise(exhibit, age) {
+  const progress = Math.min(age / MATERIALISE_SECONDS, 1);
+  const window = 1 - MATERIALISE_STAGGER;
+
+  for (const mesh of exhibit.voxelMeshes) {
+    const cells = mesh.userData.cells;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      const local = (progress - cell.delay) / window;
+      const scale = local <= 0 ? 0 : local >= 1 ? 1 : easeOutBack(local, exhibit.pop);
+      SCRATCH_MATRIX.makeScale(scale, scale, scale);
+      SCRATCH_MATRIX.setPosition(cell.x, cell.y, cell.z);
+      mesh.setMatrixAt(i, SCRATCH_MATRIX);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Finished: stop touching it, and let it be a static two draw calls again.
+  if (progress >= 1) exhibit.materialised = true;
+}
+
+/**
+ * The idle life of a landed exhibit.
+ *
+ * Everything breathes and rocks a little; creatures and characters also pace
+ * their own patch of the plot. A park of things that are merely standing still
+ * reads as a gallery, and a gallery is not what anybody queued for.
+ *
+ * Deliberately small and bounded. Collision reads the group's live position, so
+ * pacing is safe for free, but an exhibit that could leave its plot or drift
+ * into the road would be a bug nobody is at the booth to fix.
+ */
+function idleFor(structure, group, plotAt, nudge) {
+  const anchorX = plotAt.x + nudge[0];
+  const anchorZ = plotAt.z + nudge[1];
+
+  return {
+    baseYaw: group.rotation.y,
+    // A shared phase would have the whole park breathing in unison, which
+    // reads as a glitch rather than as life.
+    bobPhase: Math.random() * Math.PI * 2,
+    bobRate: 1.1 + Math.random() * 0.7,
+    swayPhase: Math.random() * Math.PI * 2,
+    swayRate: 0.7 + Math.random() * 0.5,
+    glow: group.children.find((child) => child.isInstancedMesh && child.material.isMeshBasicMaterial)?.material ?? null,
+    wander: SUBJECTS_THAT_WANDER.has(structure.subject),
+    anchorX,
+    anchorZ,
+    targetX: anchorX,
+    targetZ: anchorZ,
+  };
+}
+
+function stepIdle(exhibit, delta, now) {
+  const idle = exhibit.idle;
+  const age = now - exhibit.born;
+
+  if (idle.wander) stepWander(exhibit, idle, delta);
+
+  exhibit.group.position.y = exhibit.restY + Math.sin(age * idle.bobRate + idle.bobPhase) * BOB_HEIGHT;
+  exhibit.group.rotation.y = idle.baseYaw + Math.sin(age * idle.swayRate + idle.swayPhase) * SWAY_ANGLE;
+
+  // Anything glowing breathes with it, which is what carries an exhibit across
+  // the park when you cannot yet make out its shape.
+  if (idle.glow) idle.glow.color.setScalar(0.82 + 0.18 * Math.sin(age * 2.1 + idle.bobPhase));
+}
+
+function stepWander(exhibit, idle, delta) {
+  const at = exhibit.group.position;
+  const dx = idle.targetX - at.x;
+  const dz = idle.targetZ - at.z;
+  const distance = Math.hypot(dx, dz);
+
+  if (distance < 0.2) {
+    const angle = Math.random() * Math.PI * 2;
+    const reach = WANDER_RADIUS * (0.35 + Math.random() * 0.65);
+    idle.targetX = idle.anchorX + Math.cos(angle) * reach;
+    idle.targetZ = idle.anchorZ + Math.sin(angle) * reach;
+    return;
+  }
+
+  const step = Math.min(WANDER_SPEED * delta, distance);
+  at.x += (dx / distance) * step;
+  at.z += (dz / distance) * step;
+
+  // Turn to face where it is going, rather than sliding there sideways.
+  const heading = Math.atan2(dx, dz);
+  idle.baseYaw += wrapAngle(heading - idle.baseYaw) * Math.min(1, WANDER_TURN_RATE * delta);
+}
+
 function voxelMeshes(structure) {
   const { solid, glow } = shadeVoxels(structure.voxels, structure.palette);
   const meshes = [];
@@ -860,11 +1007,15 @@ function instancedCubes(cells, material, shadows) {
   const color = new THREE.Color();
 
   cells.forEach((cell, index) => {
+    // Stagger each cube by how high it sits, so the build sweeps up the model.
+    cell.delay = cell.rise * MATERIALISE_STAGGER;
     matrix.makeTranslation(cell.x, cell.y, cell.z);
     mesh.setMatrixAt(index, matrix);
     mesh.setColorAt(index, color.set(cell.color));
   });
 
+  // Kept so the assemble can rewrite every matrix each frame while it runs.
+  mesh.userData.cells = cells;
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.castShadow = shadows;
