@@ -11,7 +11,7 @@
     "dev": "node --watch server/index.js",
     "pregenerate": "node scripts/pregenerate.js",
     "test": "node --test test/*.test.js",
-    "offline": "OFFLINE=1 node server/index.js"
+    "offline": "node server/index.js --offline"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

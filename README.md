@@ -17,6 +17,11 @@ npm install          # the only step that needs internet - do it at home
 npm run offline      # http://localhost:3000
 ```
 
+Works the same on Windows, macOS and Linux. (Offline mode is a `--offline`
+flag rather than an environment variable specifically so that `npm run offline`
+works in Windows cmd and PowerShell, where `OFFLINE=1 node ...` is a syntax
+error.)
+
 **If your school network blocks things, run `npm run offline` and don't think
 about it again.** Nothing touches the network: exhibits are built on the laptop,
 and the page loads zero external resources. `npm start` is the same thing with

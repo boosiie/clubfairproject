@@ -44,12 +44,19 @@ const MAX_CALLS_PER_DAY = Number(process.env.MAX_CALLS_PER_DAY || 1500);
 /**
  * Never touch the network at all.
  *
- * Set OFFLINE=1 when the venue blocks the API - a school network usually
+ * Pass --offline when the venue blocks the API - a school network usually
  * does. Everything is then built locally: the hand-authored pack for things it
- * knows, and the generator in offline.js for everything else. MOCK=1 is the
- * older name for the same switch.
+ * knows, and the generator in offline.js for everything else.
+ *
+ * The flag rather than an env var is deliberate: `OFFLINE=1 node ...` is POSIX
+ * shell syntax and fails outright on Windows cmd and PowerShell, which is what
+ * a school laptop is most likely to be running. OFFLINE=1 still works for
+ * anyone on macOS or Linux who prefers it.
  */
-const OFFLINE = process.env.OFFLINE === '1' || process.env.MOCK === '1' || !isConfigured();
+const offlineRequested = process.argv.includes('--offline')
+  || process.env.OFFLINE === '1'
+  || process.env.MOCK === '1';
+const OFFLINE = offlineRequested || !isConfigured();
 
 /**
  * Circuit breaker for a network that is present but blocked.
@@ -250,7 +257,7 @@ app.listen(PORT, () => {
 
   if (!OFFLINE) {
     console.log(`  Daily call budget:        ${MAX_CALLS_PER_DAY}\n`);
-  } else if (process.env.OFFLINE === '1' || process.env.MOCK === '1') {
+  } else if (offlineRequested) {
     console.log('\n  Offline by choice - nothing will touch the network.\n');
   } else {
     console.log('\n  No ANTHROPIC_API_KEY found - everything is built locally.');
