@@ -7,12 +7,29 @@
     <link rel="stylesheet" href="/styles.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎡</text></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎢</text></svg>"
     />
+
+    <!--
+      three.js and its GLTFLoader are served from node_modules, never a CDN: the
+      venue network blocks things and a park that cannot load its renderer is a
+      blank screen. The import map is what lets the loader's bare `import
+      "three"` resolve with no bundler in the project.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/three.module.js",
+          "three/addons/": "/vendor/three-addons/"
+        }
+      }
+    </script>
   </head>
   <body>
-    <!-- The park canvas is injected here by Matter.Render. -->
     <div id="world" aria-hidden="true"></div>
+    <!-- Exhibit signs are HTML, positioned each frame over the 3D view. Cheaper
+         than text geometry and always crisp on a projector. -->
+    <div id="signs" aria-hidden="true"></div>
 
     <header class="hud hud--top">
       <div class="brand">
@@ -25,12 +42,10 @@
       </dl>
     </header>
 
-    <!-- The prompt sits in the middle of the screen, over the plot you are
-         standing in. Walk somewhere, type, watch it drop in. -->
     <div class="stage" id="stage">
       <div class="plotcard" id="plotcard">
-        <span class="plotcard__num" id="plot-num">PLOT 1</span>
-        <span class="plotcard__state" id="plot-state">empty lot</span>
+        <span class="plotcard__num" id="plot-num">THE ROAD</span>
+        <span class="plotcard__state" id="plot-state">walk onto a plot to build</span>
       </div>
 
       <form class="composer" id="composer" autocomplete="off">
@@ -40,7 +55,7 @@
           type="text"
           name="prompt"
           maxlength="140"
-          placeholder="a statue of your chemistry teacher"
+          placeholder="a giant purple dragon"
           aria-label="Describe what to build in this plot"
           spellcheck="false"
         />
@@ -49,24 +64,25 @@
 
       <!-- Roughly half of booth traffic will not type. These are for them. -->
       <div class="presets" id="presets">
-        <button type="button" data-prompt="a giant statue">giant statue</button>
+        <button type="button" data-prompt="a giant purple dragon">purple dragon</button>
+        <button type="button" data-prompt="a marble statue">marble statue</button>
         <button type="button" data-prompt="a ferris wheel">ferris wheel</button>
-        <button type="button" data-prompt="a dragon">dragon</button>
         <button type="button" data-prompt="a giant robot">giant robot</button>
-        <button type="button" data-prompt="a bouncy castle">bouncy castle</button>
-        <button type="button" data-prompt="a rocket ship">rocket ship</button>
+        <button type="button" data-prompt="a bouncy castle made of jello">jello castle</button>
+        <button type="button" data-prompt="a rocket">rocket</button>
       </div>
     </div>
 
     <footer class="controls" id="controls">
-      <span class="controls__group"><kbd>A</kbd><kbd>D</kbd> or <kbd>&larr;</kbd><kbd>&rarr;</kbd> walk</span>
+      <span class="controls__group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
+      <span class="controls__group"><kbd>Shift</kbd> run</span>
       <span class="controls__group"><kbd>Space</kbd> jump</span>
+      <span class="controls__group">drag to look</span>
       <span class="controls__group"><kbd>Enter</kbd> build here</span>
     </footer>
 
     <div class="pill" id="pill" hidden></div>
 
-    <script src="/vendor/matter.min.js"></script>
     <script type="module" src="/js/main.js"></script>
   </body>
 </html>

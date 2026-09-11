@@ -1,7 +1,7 @@
 {
   "name": "clubfair-park",
   "version": "1.0.0",
-  "description": "Club fair booth demo: a walkable 2D amusement park where students type anything and the model builds it into a plot of land.",
+  "description": "Club fair booth demo: a walkable 3D amusement park where students type anything and it gets built into a plot of land.",
   "type": "module",
   "engines": {
     "node": ">=20.12"
@@ -9,14 +9,14 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "pregenerate": "node scripts/pregenerate.js",
     "test": "node --test test/*.test.js",
-    "offline": "node server/index.js --offline"
+    "offline": "node server/index.js --offline",
+    "fetch-models": "node scripts/fetch-models.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
     "express": "^5.2.1",
-    "matter-js": "^0.20.0"
+    "three": "^0.186.0"
   },
   "private": true
 }

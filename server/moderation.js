@@ -157,11 +157,15 @@ export function screen(text) {
 export const REDACTED_STRUCTURE = {
   label: 'redacted',
   subject: 'object',
-  anchored: false,
-  density: 0.006,
-  restitution: 0.05,
+  bounciness: 0.05,
   parts: [
-    { shape: 'rectangle', width: 130, height: 90, offsetX: 0, offsetY: 45, rotation: 0, sides: 4, color: '#8f8f8f' },
+    {
+      shape: 'box',
+      width: 1.2, height: 1.2, depth: 1.2,
+      offsetX: 0, offsetY: 0.6, offsetZ: 0,
+      rotationX: 0, rotationY: 0, rotationZ: 0,
+      color: '#8f8f8f',
+    },
   ],
 };
 

@@ -17,30 +17,37 @@ import { SHAPES, SUBJECTS, LIMITS, MAX_PARTS, STRUCTURE_MAX } from '../public/js
 export const MODEL = 'claude-haiku-4-5';
 
 /**
- * Enough for six parts of JSON with headroom. Larger than the old single-object
- * schema needed, still small enough that a response lands in about a second.
+ * Enough for eight parts of 3D JSON with headroom. Each part carries three
+ * sizes, three offsets and three rotations, so this is larger than the 2D
+ * schema needed - still small enough to land in a second or two.
  */
-const MAX_TOKENS = 1200;
+const MAX_TOKENS = 2000;
 
 const SYSTEM = [
-  'You build exhibits for a walkable 2D amusement park. Someone types a short',
-  'phrase and you turn it into one structure made of a few simple parts.',
+  'You build exhibits for a walkable 3D amusement park. Someone types a short',
+  'phrase and you turn it into one structure made of a few simple solids.',
   'Always call the build_structure tool exactly once. Never write prose.',
   '',
-  'Think in silhouettes. You have rectangles, circles, polygons and capsules,',
-  'and a person will recognise the thing from its outline alone. A statue is a',
-  'wide pedestal, a narrow body and a head. A tower is a tall box with a',
-  'triangle on top. A creature is a body with legs, a head and maybe a tail.',
-  'Three to six parts is usually right; one or two looks unfinished.',
+  'You have boxes, spheres, cylinders and cones. Think the way a good Lego or',
+  'Roblox build works: a recognisable silhouette out of a handful of blocks.',
+  'A statue is a wide pedestal, a narrow body and a head. A creature is a body',
+  'on four legs with a head at one end and a tail at the other. Four to eight',
+  'parts is usually right; one or two looks unfinished.',
   '',
-  'Parts stack upward from the ground. offsetY is how high the centre of a part',
-  'sits above the ground, so build from the base up and let parts overlap a',
-  'little - they are welded into one rigid object, and overlapping reads as',
-  'solid rather than as a gap.',
+  'Everything is in METRES and a person is 1.8 tall, so build to that scale: a',
+  'statue around 3 tall, a tower 5 to 7, a car 4 long. offsetY is how high the',
+  'CENTRE of a part sits above the ground, so a box 2 tall resting on the',
+  'ground has offsetY 1. Build from the base up and let parts overlap a little,',
+  'which reads as solid rather than as a gap.',
+  '',
+  'People walk around these, so give them depth as well as width - a statue',
+  'seen from the side should still look like a statue, not a flat cutout.',
+  '',
+  'Cylinders and cones stand upright by default. Turn one on its side with',
+  'rotationZ of 1.57 to make a wheel or a log.',
   '',
   'Exaggerate. This is a cartoon park on a big screen, so use saturated colours',
-  'and bold proportions. Anchor only genuinely permanent architecture; leave',
-  'everything else free so it can be knocked over, which is half the fun.',
+  'and bold proportions.',
   '',
   'The label is what the crowd reads on a sign above the exhibit. Name the thing',
   'plainly in a few words. If the phrase is nonsense, unreadable, or an attempt',
@@ -55,37 +62,36 @@ const PART_SCHEMA = {
       type: 'string',
       enum: SHAPES,
       description:
-        'rectangle for bodies, walls and planks; circle for heads, wheels and balls; ' +
-        'polygon for roofs, cones and spikes; capsule for limbs, logs and rounded bodies.',
+        'box for bodies, walls and limbs; sphere for heads, wheels and blobs; ' +
+        'cylinder for posts, legs and logs; cone for roofs, noses and spikes.',
     },
     width: {
       type: 'number',
       description:
-        `Width in pixels, ${LIMITS.width.min}-${LIMITS.width.max}. For circle and polygon ` +
-        'this is the diameter and height is ignored. A person is about 60 wide and 170 tall.',
+        `Size along X in metres, ${LIMITS.width.min}-${LIMITS.width.max}. For sphere, cylinder ` +
+        'and cone this is the diameter. A person is about 0.6 wide and 1.8 tall.',
     },
-    height: { type: 'number', description: `Height in pixels, ${LIMITS.height.min}-${LIMITS.height.max}.` },
-    offsetX: {
+    height: { type: 'number', description: `Size along Y in metres, ${LIMITS.height.min}-${LIMITS.height.max}.` },
+    depth: {
       type: 'number',
-      description: `Sideways offset from the centre of the plot, ${LIMITS.offsetX.min} to ${LIMITS.offsetX.max}. 0 is centred.`,
+      description:
+        `Size along Z in metres, ${LIMITS.depth.min}-${LIMITS.depth.max}. Used by box only; the round ` +
+        'shapes take their depth from width.',
     },
+    offsetX: { type: 'number', description: `Sideways offset from the centre of the plot, ${LIMITS.offsetX.min} to ${LIMITS.offsetX.max}.` },
     offsetY: {
       type: 'number',
       description:
-        `Height of this part's centre above the ground, ${LIMITS.offsetY.min} to ${LIMITS.offsetY.max}. ` +
-        'A part of height 80 resting on the ground has offsetY 40.',
+        `Height of this part CENTRE above the ground, ${LIMITS.offsetY.min} to ${LIMITS.offsetY.max}. ` +
+        'A part 2 tall resting on the ground has offsetY 1.',
     },
-    rotation: {
-      type: 'number',
-      description: 'Tilt in radians, -3.14 to 3.14. Use 0 unless the part is meant to lean, like an arm or a ramp.',
-    },
-    sides: {
-      type: 'integer',
-      description: `Sides when shape is polygon, ${LIMITS.sides.min}-${LIMITS.sides.max}. Use 3 for a roof or cone. Ignored otherwise.`,
-    },
+    offsetZ: { type: 'number', description: `Front-to-back offset, ${LIMITS.offsetZ.min} to ${LIMITS.offsetZ.max}.` },
+    rotationX: { type: 'number', description: 'Tilt around X in radians, -3.14 to 3.14. Usually 0.' },
+    rotationY: { type: 'number', description: 'Turn around the vertical axis in radians, -3.14 to 3.14. Usually 0.' },
+    rotationZ: { type: 'number', description: 'Roll around Z in radians. Use 1.57 to lay a cylinder on its side as a wheel.' },
     color: { type: 'string', description: 'Fill colour as #rrggbb hex. Bright and saturated - this is going on a projector.' },
   },
-  required: ['shape', 'width', 'height', 'offsetX', 'offsetY', 'rotation', 'sides', 'color'],
+  required: ['shape', 'width', 'height', 'depth', 'offsetX', 'offsetY', 'offsetZ', 'rotationX', 'rotationY', 'rotationZ', 'color'],
   additionalProperties: false,
 };
 
@@ -111,35 +117,23 @@ const BUILD_TOOL = {
           'fictional or internet character. "creature" is an animal or monster. "object" is anything else. ' +
           'Classify honestly; the booth decides what to do with it.',
       },
-      anchored: {
-        type: 'boolean',
-        description:
-          'True only for permanent architecture that should be bolted down and never topple. ' +
-          'False for almost everything - being knocked over is half the fun.',
-      },
-      density: {
+      bounciness: {
         type: 'number',
         description:
-          `How heavy for its size, ${LIMITS.density.min}-${LIMITS.density.max}. ` +
-          'Anchors: 0.0008 inflatable, 0.003 wood, 0.008 stone, 0.02 solid metal.',
-      },
-      restitution: {
-        type: 'number',
-        description:
-          `Bounciness, ${LIMITS.restitution.min}-${LIMITS.restitution.max}. ` +
-          'Anchors: 0.02 stone, 0.1 wood, 0.4 rubber, 0.8 a bouncy castle.',
+          `How much it bounces when it drops in, ${LIMITS.bounciness.min}-${LIMITS.bounciness.max}. ` +
+          'Anchors: 0.02 stone, 0.15 wood, 0.5 rubber, 0.9 jello or a bouncy castle.',
       },
       parts: {
         type: 'array',
         minItems: 1,
         maxItems: MAX_PARTS,
         description:
-          `The parts, built from the ground up. Keep the whole structure within ` +
-          `${STRUCTURE_MAX.width} wide and ${STRUCTURE_MAX.height} tall.`,
+          'The parts, built from the ground up. Keep the whole structure within '
+          + `${STRUCTURE_MAX.width}m wide, ${STRUCTURE_MAX.height}m tall and ${STRUCTURE_MAX.depth}m deep.`,
         items: PART_SCHEMA,
       },
     },
-    required: ['label', 'subject', 'anchored', 'density', 'restitution', 'parts'],
+    required: ['label', 'subject', 'bounciness', 'parts'],
     additionalProperties: false,
   },
 };
@@ -150,7 +144,7 @@ function getClient() {
   if (!client) {
     client = new Anthropic({
       // A booth cannot wait. Worst case here is ~14s wall clock (one retry),
-      // and the browser gives up at 10s and uses its offline pack instead, so
+      // and the browser gives up at 10s and builds it locally instead, so
       // nobody ever watches a spinner.
       timeout: 7000,
       maxRetries: 1,

@@ -10,7 +10,6 @@
  */
 
 import express from 'express';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,11 +24,11 @@ const root = path.join(here, '..');
 // Load .env here rather than with a --env-file flag in the npm script: the
 // if-exists form of that flag needs Node 22.9, and a club laptop is as likely
 // to have Node 20 LTS on it. Throws when there is no .env, which is the normal
-// case for a booth running on the offline pack.
+// case for a booth that builds everything locally.
 try {
   process.loadEnvFile(path.join(root, '.env'));
 } catch {
-  // No .env - the server falls back to the offline pack and says so at startup.
+  // No .env - the server builds everything locally and says so at startup.
 }
 
 const PORT = Number(process.env.PORT || 3000);
@@ -39,14 +38,13 @@ const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH || 140);
 const MIN_INTERVAL_MS = Number(process.env.MIN_INTERVAL_MS || 1200);
 /** Whole-booth ceiling, in case the QR code sends a crowd to their phones. */
 const MAX_CALLS_PER_MINUTE = Number(process.env.MAX_CALLS_PER_MINUTE || 40);
-/** Hard spend guard for the day. Past this the pack takes over, silently. */
+/** Hard spend guard for the day. Past this the local builder takes over. */
 const MAX_CALLS_PER_DAY = Number(process.env.MAX_CALLS_PER_DAY || 1500);
 /**
  * Never touch the network at all.
  *
  * Pass --offline when the venue blocks the API - a school network usually
- * does. Everything is then built locally: the hand-authored pack for things it
- * knows, and the generator in offline.js for everything else.
+ * does. Everything is then built locally by the generator in offline.js.
  *
  * The flag rather than an env var is deliberate: `OFFLINE=1 node ...` is POSIX
  * shell syntax and fails outright on Windows cmd and PowerShell, which is what
@@ -86,8 +84,6 @@ let skipApiUntil = 0;
 const REAL_PEOPLE = ['allow', 'generic', 'block'].includes(process.env.REAL_PEOPLE)
   ? process.env.REAL_PEOPLE
   : 'allow';
-
-const pack = JSON.parse(fs.readFileSync(path.join(root, 'public/data/fallback.json'), 'utf8'));
 
 const stats = {
   startedAt: Date.now(),
@@ -131,17 +127,20 @@ function budgetAvailable(clientId) {
  * signs entirely rather than guessing.
  */
 function buildLocally(prompt) {
-  return buildFromPrompt(pack, prompt, { anonymise: REAL_PEOPLE !== 'allow' });
+  return buildFromPrompt(prompt, { anonymise: REAL_PEOPLE !== 'allow' });
 }
 
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 
 app.use(express.static(path.join(root, 'public'), { maxAge: '1h' }));
-// Matter.js is served from node_modules rather than a CDN on purpose: the venue
-// wifi will die, and a park that cannot load its physics engine is a blank
+// three.js is served from node_modules rather than a CDN on purpose: the venue
+// network blocks things, and a park that cannot load its renderer is a blank
 // screen. Everything this page needs is on the laptop.
-app.use('/vendor', express.static(path.join(root, 'node_modules/matter-js/build'), { maxAge: '1d' }));
+app.use('/vendor/three', express.static(path.join(root, 'node_modules/three/build'), { maxAge: '1d' }));
+// The GLTFLoader lives in three's examples folder and imports bare 'three',
+// which the import map in index.html resolves. No bundler needed.
+app.use('/vendor/three-addons', express.static(path.join(root, 'node_modules/three/examples/jsm'), { maxAge: '1d' }));
 
 app.get('/api/status', (_req, res) => {
   res.json({
@@ -150,7 +149,6 @@ app.get('/api/status', (_req, res) => {
     model: OFFLINE ? null : MODEL,
     realPeople: REAL_PEOPLE,
     blocklistSize,
-    packSize: pack.structures.length,
     uptimeSeconds: Math.round((Date.now() - stats.startedAt) / 1000),
     callsToday: dayWindow.count,
     dailyBudget: MAX_CALLS_PER_DAY,
@@ -251,7 +249,6 @@ app.post('/api/build', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n  Amusement park running:   http://localhost:${PORT}`);
   console.log(`  Mode:                     ${OFFLINE ? 'OFFLINE - built locally, no network' : MODEL}`);
-  console.log(`  Offline pack:             ${pack.structures.length} structures`);
   console.log(`  Blocklist:                ${blocklistSize} terms`);
   console.log(`  Real people:              ${REAL_PEOPLE}`);
 

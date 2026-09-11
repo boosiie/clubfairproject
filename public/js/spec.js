@@ -2,52 +2,44 @@
  * spec.js - the single source of truth for what the model is allowed to emit.
  *
  * Imported by BOTH the Node server and the browser, so a structure can never be
- * clamped one way on the server and another way in the park.
+ * clamped one way on the server and another way in the world.
  *
- * A creation is a STRUCTURE: a label plus one to six parts. Parts are what let
- * "a statue of someone" read as a statue - a wide pedestal, a narrow body, a
- * head - instead of being one anonymous box. The parts are welded into a single
- * rigid body, so the statue holds its shape, stands in its plot, and can still
- * be knocked over by whatever the next person builds.
+ * A creation is a STRUCTURE: a label plus up to eight parts. Parts are boxes,
+ * spheres, cylinders and cones, which is deliberately the Roblox palette - you
+ * can read "a statue" or "a dragon" out of a handful of blocks, and every build
+ * is different because nothing is coming from a fixed model catalogue.
  *
  * The safety story lives here: the model's only channel to the screen is this
  * schema. Every field is validated and clamped. Nothing it returns is rendered
  * as free text except `label`, which is length-capped, character-filtered, and
  * blocklisted.
+ *
+ * Units are metres. A person is about 1.8 tall.
  */
 
-export const SHAPES = ['rectangle', 'circle', 'polygon', 'capsule'];
+export const SHAPES = ['box', 'sphere', 'cylinder', 'cone'];
 
 /** What the creation depicts. The model classifies; the server decides policy. */
 export const SUBJECTS = ['object', 'creature', 'character', 'real_person'];
 
-export const MAX_PARTS = 6;
+export const MAX_PARTS = 8;
 
 export const LIMITS = {
-  width: { min: 8, max: 300, fallback: 60 },
-  height: { min: 8, max: 300, fallback: 60 },
-  offsetX: { min: -200, max: 200, fallback: 0 },
-  offsetY: { min: -60, max: 420, fallback: 0 },
-  rotation: { min: -3.15, max: 3.15, fallback: 0 },
-  sides: { min: 3, max: 8, fallback: 5 },
-  density: { min: 0.0006, max: 0.02, fallback: 0.003 },
-  restitution: { min: 0, max: 0.85, fallback: 0.1 },
+  width: { min: 0.1, max: 6, fallback: 1 },
+  height: { min: 0.1, max: 6, fallback: 1 },
+  depth: { min: 0.1, max: 6, fallback: 1 },
+  offsetX: { min: -4, max: 4, fallback: 0 },
+  offsetY: { min: -1, max: 9, fallback: 0 },
+  offsetZ: { min: -4, max: 4, fallback: 0 },
+  rotationX: { min: -3.15, max: 3.15, fallback: 0 },
+  rotationY: { min: -3.15, max: 3.15, fallback: 0 },
+  rotationZ: { min: -3.15, max: 3.15, fallback: 0 },
+  bounciness: { min: 0, max: 1, fallback: 0.2 },
   labelMaxLength: 30,
 };
 
-/**
- * Mass band, enforced after the body exists (see park.js).
- *
- * Matter.js is a sequential-impulse solver: mass ratios beyond roughly 1000:1
- * make heavy bodies punch through light ones and tunnel out of the world. The
- * density and size ranges multiply out far past that, so we clamp the resulting
- * mass instead. A wrecking ball still topples a statue; it just stops deleting
- * it from the universe.
- */
-export const MASS_BAND = { min: 4, max: 900 };
-
-/** How much of a plot one structure may fill. */
-export const STRUCTURE_MAX = { width: 460, height: 520 };
+/** How much of a plot one structure may fill, in metres. */
+export const STRUCTURE_MAX = { width: 6, height: 7, depth: 6 };
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 const LABEL_ALLOWED = /[^a-zA-Z0-9 '\-.!?&]/g;
@@ -68,6 +60,11 @@ function num(value, limit) {
   const n = typeof value === 'number' ? value : parseFloat(value);
   if (!Number.isFinite(n)) return limit.fallback;
   return clamp(n, limit.min, limit.max);
+}
+
+/** Round to centimetres - enough precision, and keeps the JSON small. */
+function round(n) {
+  return Math.round(n * 100) / 100;
 }
 
 /** Deterministic pleasant colour from a string, so a bad `color` still gives variety. */
@@ -92,9 +89,8 @@ function relativeLuminance(hex) {
 }
 
 /**
- * Lift near-black colours so they stay visible against the night sky. The
- * threshold is deliberately low - set it higher and it starts "fixing"
- * perfectly readable slates and navies, which is worse than leaving them alone.
+ * Lift near-black colours so they stay visible. Unlit near-black geometry reads
+ * as a hole in the world rather than as an object.
  */
 const MIN_LUMINANCE = 0.035;
 
@@ -142,26 +138,32 @@ export function sanitizeLabel(value, fallback = 'mystery exhibit') {
 
 function normalizePart(raw, seed, index) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const shape = SHAPES.includes(source.shape) ? source.shape : 'rectangle';
+  const shape = SHAPES.includes(source.shape) ? source.shape : 'box';
 
   const part = {
     shape,
-    width: Math.round(num(source.width, LIMITS.width)),
-    height: Math.round(num(source.height, LIMITS.height)),
-    offsetX: Math.round(num(source.offsetX, LIMITS.offsetX)),
-    offsetY: Math.round(num(source.offsetY, LIMITS.offsetY)),
-    rotation: num(source.rotation, LIMITS.rotation),
-    sides: Math.round(num(source.sides, LIMITS.sides)),
+    width: round(num(source.width, LIMITS.width)),
+    height: round(num(source.height, LIMITS.height)),
+    depth: round(num(source.depth, LIMITS.depth)),
+    offsetX: round(num(source.offsetX, LIMITS.offsetX)),
+    offsetY: round(num(source.offsetY, LIMITS.offsetY)),
+    offsetZ: round(num(source.offsetZ, LIMITS.offsetZ)),
+    rotationX: round(num(source.rotationX, LIMITS.rotationX)),
+    rotationY: round(num(source.rotationY, LIMITS.rotationY)),
+    rotationZ: round(num(source.rotationZ, LIMITS.rotationZ)),
     color: normalizeColor(source.color, `${seed}:${index}`),
   };
 
-  // Circles and regular polygons are defined by one dimension; keep them round.
-  if (shape === 'circle' || shape === 'polygon') part.height = part.width;
+  // A sphere is round in every direction; a cylinder and a cone are round in
+  // the horizontal plane. Keeping those consistent stops the model producing
+  // accidental squashed eggs when it only meant to set one dimension.
+  if (shape === 'sphere') part.depth = part.height = part.width;
+  if (shape === 'cylinder' || shape === 'cone') part.depth = part.width;
   return part;
 }
 
 /**
- * Coerce anything - a model tool call, a cached fallback entry, a hand-written
+ * Coerce anything - a model tool call, a cached pack entry, a hand-written
  * literal - into a structure that is safe to build.
  * Never throws, never returns null, always returns something buildable.
  */
@@ -175,75 +177,97 @@ export function normalizeStructure(input) {
   return fitStructure({
     label,
     subject: SUBJECTS.includes(raw.subject) ? raw.subject : 'object',
-    anchored: raw.anchored === true,
-    density: num(raw.density, LIMITS.density),
-    restitution: num(raw.restitution, LIMITS.restitution),
+    bounciness: round(num(raw.bounciness, LIMITS.bounciness)),
     parts,
   });
 }
 
 /**
- * How much room a part actually takes up, centred on its offset.
+ * How much room a part takes up, centred on its offset.
  *
- * A regular polygon is not as tall as it is wide: drawn point-up with a flat
- * base it reaches its full radius above the centre but only the apothem below.
- * Treating it as a square box makes every pyramid hover above the ground and
- * every roof float off its walls, so measure the real thing.
+ * A cone is as wide as its base but tapers, and a rotated part sweeps a wider
+ * box than it occupies. Both are approximated generously here: over-reserving
+ * only makes a structure slightly smaller than it had to be, while
+ * under-reserving lets things poke into the neighbouring plot.
  */
 export function partExtents(part) {
-  let width = part.width;
-  let height = part.height;
+  let { width, height, depth } = part;
 
-  if (part.shape === 'polygon') {
-    const radius = part.width / 2;
-    height = radius + radius * Math.cos(Math.PI / part.sides);
+  // Each rotation sweeps the two axes it turns within, so widen both of them to
+  // the diagonal. Taking the max per axis handles parts rotated on more than
+  // one at once.
+  if (part.rotationY) {
+    const sweep = Math.hypot(part.width, part.depth);
+    width = Math.max(width, sweep);
+    depth = Math.max(depth, sweep);
+  }
+  if (part.rotationX) {
+    const sweep = Math.hypot(part.height, part.depth);
+    height = Math.max(height, sweep);
+    depth = Math.max(depth, sweep);
+  }
+  if (part.rotationZ) {
+    const sweep = Math.hypot(part.width, part.height);
+    width = Math.max(width, sweep);
+    height = Math.max(height, sweep);
   }
 
-  // A rotated part sweeps a larger box; use the diagonal so nothing pokes out
-  // of its plot once the rotation is applied.
-  if (part.rotation) {
-    const diagonal = Math.hypot(width, height);
-    return { width: diagonal, height: diagonal };
-  }
-  return { width, height };
+  return { width, height, depth };
 }
 
 /** Axis-aligned bounds of a whole structure, measured from its parts. */
 export function structureBounds(structure) {
-  let minX = Infinity; let maxX = -Infinity;
-  let minY = Infinity; let maxY = -Infinity;
+  const bounds = {
+    minX: Infinity, maxX: -Infinity,
+    minY: Infinity, maxY: -Infinity,
+    minZ: Infinity, maxZ: -Infinity,
+  };
 
   for (const part of structure.parts) {
     const reach = partExtents(part);
-    minX = Math.min(minX, part.offsetX - reach.width / 2);
-    maxX = Math.max(maxX, part.offsetX + reach.width / 2);
-    minY = Math.min(minY, part.offsetY - reach.height / 2);
-    maxY = Math.max(maxY, part.offsetY + reach.height / 2);
+    bounds.minX = Math.min(bounds.minX, part.offsetX - reach.width / 2);
+    bounds.maxX = Math.max(bounds.maxX, part.offsetX + reach.width / 2);
+    bounds.minY = Math.min(bounds.minY, part.offsetY - reach.height / 2);
+    bounds.maxY = Math.max(bounds.maxY, part.offsetY + reach.height / 2);
+    bounds.minZ = Math.min(bounds.minZ, part.offsetZ - reach.depth / 2);
+    bounds.maxZ = Math.max(bounds.maxZ, part.offsetZ + reach.depth / 2);
   }
 
-  return { minX, maxX, minY, maxY, width: maxX - minX, height: maxY - minY };
+  return {
+    ...bounds,
+    width: bounds.maxX - bounds.minX,
+    height: bounds.maxY - bounds.minY,
+    depth: bounds.maxZ - bounds.minZ,
+  };
 }
 
 /**
- * Scale a structure down so it fits inside one plot, then sit it on the ground.
+ * Scale a structure to fit inside one plot, then sit it on the ground.
  *
- * The model is told the size limits, but it thinks in "a statue is about this
- * big" and routinely overshoots. Scaling the whole structure keeps proportions
- * intact - clamping each part individually would turn a tall statue into a
- * squat one.
+ * The model is told the size limits but thinks in "a statue is about this big"
+ * and routinely overshoots. Scaling the whole structure keeps proportions
+ * intact - clamping each part on its own would turn a tall statue into a squat
+ * one. The vertical lift matters just as much: a model that puts parts below
+ * zero buries half the build underground, which is the single most common way
+ * a generated structure looks broken.
  */
 export function fitStructure(structure, max = STRUCTURE_MAX) {
   const bounds = structureBounds(structure);
-  const scale = Math.min(1, max.width / bounds.width, max.height / bounds.height);
+  const scale = Math.min(
+    1,
+    max.width / bounds.width,
+    max.height / bounds.height,
+    max.depth / bounds.depth,
+  );
 
   const parts = structure.parts.map((part) => ({
     ...part,
-    width: Math.max(LIMITS.width.min, Math.round(part.width * scale)),
-    height: Math.max(LIMITS.height.min, Math.round(part.height * scale)),
-    offsetX: Math.round(part.offsetX * scale),
-    // Lift so the lowest point of the structure sits at offsetY 0 - otherwise
-    // half of what the model builds starts underground.
-    offsetY: Math.round((part.offsetY - bounds.minY) * scale),
+    width: round(Math.max(LIMITS.width.min, part.width * scale)),
+    height: round(Math.max(LIMITS.height.min, part.height * scale)),
+    depth: round(Math.max(LIMITS.depth.min, part.depth * scale)),
+    offsetX: round(part.offsetX * scale),
+    offsetY: round((part.offsetY - bounds.minY) * scale),
+    offsetZ: round(part.offsetZ * scale),
   }));
 
   return { ...structure, parts };
