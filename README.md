@@ -21,6 +21,12 @@ rather than an environment variable specifically so that `npm run offline`
 works in Windows cmd and PowerShell, where `OFFLINE=1 node ...` is a syntax
 error.)
 
+**If the page loads but there is no world**, the browser could not start WebGL
+and the page now says so with instructions rather than showing you a blank blue
+screen. Check the terminal banner too - it prints `Build: 3D first-person` at
+startup, and the browser console prints the same on load, so which build you are
+running is never a guess.
+
 **Controls:** `WASD` to walk, `Shift` to run, `Space` to jump, click or drag to
 look around, arrow keys to turn without a mouse, `V` to switch between first
 and third person, `Enter` to build on the plot you are standing on.

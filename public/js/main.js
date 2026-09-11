@@ -39,7 +39,42 @@ const els = {
   pill: document.getElementById('pill'),
 };
 
-const world = new World(els.world, { onPlotChange: () => refreshPlotCard() });
+/**
+ * Starting the 3D world is the one thing here that can fail for reasons that
+ * have nothing to do with this code: a laptop with hardware acceleration
+ * switched off, a driver on the browser's blocklist, a locked-down school
+ * image. Without this guard that failure is silent - the module throws, the
+ * canvas never appears, and you are left looking at a blue page with a working
+ * text box and no world, which looks exactly like "it isn't 3D".
+ */
+let world;
+try {
+  world = new World(els.world, { onPlotChange: () => refreshPlotCard() });
+} catch (error) {
+  showStartupFailure(error);
+  throw error;
+}
+
+function showStartupFailure(error) {
+  const panel = document.createElement('div');
+  panel.className = 'startup-error';
+  panel.innerHTML = `
+    <h2>The 3D view could not start</h2>
+    <p>This browser could not open WebGL, so there is nothing to walk around in.
+       Everything else about the booth is fine - it is the graphics that are blocked.</p>
+    <ol>
+      <li>In Chrome, open <b>Settings &rarr; System</b> and turn on
+          <b>Use graphics acceleration when available</b>, then restart Chrome.</li>
+      <li>Check <b>chrome://gpu</b> - if WebGL says "Disabled" or "Software only",
+          the graphics driver needs updating.</li>
+      <li>Failing that, try a different browser on the same laptop.</li>
+    </ol>
+    <p class="startup-error__detail"></p>
+  `;
+  // textContent for the error itself - it is the one part that is not ours.
+  panel.querySelector('.startup-error__detail').textContent = String(error?.message ?? error);
+  document.body.appendChild(panel);
+}
 
 /** Mirrors the server's REAL_PEOPLE setting, for the server-is-gone fallback. */
 let realPeople = 'allow';
@@ -51,6 +86,9 @@ fetch('/api/status')
   .then((res) => res.json())
   .then((status) => {
     realPeople = status.realPeople ?? 'allow';
+    // So 'which build am I actually looking at' has an answer that does not
+    // depend on squinting at the screen.
+    console.info(`[park] v${status.version} - ${status.renderer} first-person - ${status.offline ? 'offline' : status.model}`);
     if (status.offline) setPill('offline mode');
   })
   .catch(() => {});

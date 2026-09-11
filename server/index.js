@@ -12,11 +12,15 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 import { normalizeStructure } from '../public/js/spec.js';
 import { buildFromPrompt } from '../public/js/offline.js';
 import { screen, REDACTED_STRUCTURE, ANONYMOUS_LABEL, blocklistSize } from './moderation.js';
 import { generateStructure, describeError, isConfigured, MODEL } from './claude.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
@@ -133,17 +137,25 @@ function buildLocally(prompt) {
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 
-app.use(express.static(path.join(root, 'public'), { maxAge: '1h' }));
+// No caching of the app itself. ETags still make a repeat load a cheap 304,
+// but a long max-age means the browser will not even ask - so after an update
+// you keep being served the previous build for an hour with no way to tell.
+// On localhost the saving was worth nothing and the confusion was expensive.
+const NO_CACHE = { maxAge: 0, etag: true };
+
+app.use(express.static(path.join(root, 'public'), NO_CACHE));
 // three.js is served from node_modules rather than a CDN on purpose: the venue
 // network blocks things, and a park that cannot load its renderer is a blank
 // screen. Everything this page needs is on the laptop.
-app.use('/vendor/three', express.static(path.join(root, 'node_modules/three/build'), { maxAge: '1d' }));
+app.use('/vendor/three', express.static(path.join(root, 'node_modules/three/build'), NO_CACHE));
 // The GLTFLoader lives in three's examples folder and imports bare 'three',
 // which the import map in index.html resolves. No bundler needed.
-app.use('/vendor/three-addons', express.static(path.join(root, 'node_modules/three/examples/jsm'), { maxAge: '1d' }));
+app.use('/vendor/three-addons', express.static(path.join(root, 'node_modules/three/examples/jsm'), NO_CACHE));
 
 app.get('/api/status', (_req, res) => {
   res.json({
+    version,
+    renderer: '3d',
     offline: OFFLINE,
     apiPaused: Date.now() < skipApiUntil,
     model: OFFLINE ? null : MODEL,
@@ -248,6 +260,7 @@ app.post('/api/build', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n  Amusement park running:   http://localhost:${PORT}`);
+  console.log(`  Build:                    3D first-person v${version}`);
   console.log(`  Mode:                     ${OFFLINE ? 'OFFLINE - built locally, no network' : MODEL}`);
   console.log(`  Blocklist:                ${blocklistSize} terms`);
   console.log(`  Real people:              ${REAL_PEOPLE}`);

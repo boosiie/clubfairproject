@@ -432,3 +432,49 @@ body.idle {
 body.locked #world canvas {
   cursor: none;
 }
+
+/* ---------- startup failure ---------- */
+
+/* Shown only when WebGL will not start. Deliberately loud: the alternative is
+   a blue page with a working text box, which reads as 'this isn't 3D'. */
+.startup-error {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+  width: min(620px, 92vw);
+  padding: 26px 30px;
+  border-radius: var(--radius);
+  border: 2px solid var(--accent);
+  background: rgba(11, 14, 23, 0.97);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.startup-error h2 {
+  margin: 0 0 10px;
+  font-size: 1.35rem;
+  color: var(--accent);
+}
+
+.startup-error p,
+.startup-error li {
+  margin: 8px 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.startup-error ol {
+  margin: 12px 0;
+  padding-left: 22px;
+}
+
+.startup-error__detail {
+  margin-top: 16px !important;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem !important;
+  color: var(--ink-dim) !important;
+  word-break: break-word;
+}
