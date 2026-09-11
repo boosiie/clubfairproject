@@ -478,3 +478,23 @@ body.locked #world canvas {
   color: var(--ink-dim) !important;
   word-break: break-word;
 }
+
+/* ---------- build tag ---------- */
+
+/* Small and permanent. Costs a corner of the screen and settles every
+   'am I running the version I think I am' question for good. */
+.buildtag {
+  position: fixed;
+  left: clamp(14px, 2vw, 28px);
+  bottom: clamp(14px, 2vw, 28px);
+  z-index: 3;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(11, 14, 23, 0.6);
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}

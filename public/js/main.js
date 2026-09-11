@@ -37,6 +37,7 @@ const els = {
   plots: document.getElementById('stat-plots'),
   controls: document.getElementById('controls'),
   pill: document.getElementById('pill'),
+  buildtag: document.getElementById('buildtag'),
 };
 
 /**
@@ -89,9 +90,10 @@ fetch('/api/status')
     // So 'which build am I actually looking at' has an answer that does not
     // depend on squinting at the screen.
     console.info(`[park] v${status.version} - ${status.renderer} first-person - ${status.offline ? 'offline' : status.model}`);
+    els.buildtag.textContent = `3D first-person - v${status.version}`;
     if (status.offline) setPill('offline mode');
   })
-  .catch(() => {});
+  .catch(() => { els.buildtag.textContent = '3D first-person - server unreachable'; });
 
 function setPill(text) {
   if (!text) {
