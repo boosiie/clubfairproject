@@ -19,7 +19,7 @@ import { buildFromPrompt, buildNonsenseBlock, looksLikeNonsense, ATTRACT_PROMPTS
 import { World, PLOT_COUNT } from './world.js';
 
 /** Give up on the server well before it gives up on the API and build locally. */
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 24_000;
 /** Nobody has touched the keyboard for this long: the park runs itself. */
 const IDLE_AFTER_MS = 30_000;
 const ATTRACT_EVERY_MS = 6000;

@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { fitStructure, structureBounds, STRUCTURE_MAX } from './spec.js';
+import { VOXEL, shadeVoxels, voxelBounds } from './voxel.js';
 
 export const PLOT_COUNT = 12;
 /** Plots per side of the boulevard. */
@@ -459,18 +460,29 @@ export class World {
 
     const meme = options.meme || null;
     const fitted = fitStructure(structure, STRUCTURE_MAX);
-    const bounds = structureBounds(fitted);
     const at = this.plotPosition(plotIndex);
 
     const group = new THREE.Group();
-    fitted.parts.forEach((part, index) => {
-      const mesh = new THREE.Mesh(geometryFor(part), materialsFor(part, index === 0 ? meme : null));
-      mesh.position.set(part.offsetX, part.offsetY, part.offsetZ);
-      mesh.rotation.set(part.rotationX, part.rotationY, part.rotationZ);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
-    });
+    let bounds;
+
+    // A meme block is the one thing that is not a sculpture. It is a single
+    // slab with a caption printed across its face, answering a prompt with no
+    // word in it, so it keeps the primitive path - a caption spread over a few
+    // hundred separate cubes would be unreadable.
+    if (meme || !fitted.voxels?.length) {
+      bounds = structureBounds(fitted);
+      fitted.parts.forEach((part, index) => {
+        const mesh = new THREE.Mesh(geometryFor(part), materialsFor(part, index === 0 ? meme : null));
+        mesh.position.set(part.offsetX, part.offsetY, part.offsetZ);
+        mesh.rotation.set(part.rotationX, part.rotationY, part.rotationZ);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      });
+    } else {
+      bounds = voxelBounds(fitted.voxels);
+      for (const mesh of voxelMeshes(fitted)) group.add(mesh);
+    }
 
     // Spread repeat builds around the plot instead of stacking them on one spot.
     const taken = this.contentsOf(plotIndex).length;
@@ -814,6 +826,51 @@ export class World {
 }
 
 /* ---------- helpers ---------- */
+
+/**
+ * Draw a sculpture: one InstancedMesh for the cubes, one more for any that glow.
+ *
+ * Instancing is what makes this affordable. Six hundred separate meshes per
+ * exhibit, times three exhibits a plot, times twelve plots, is twenty thousand
+ * draw calls and a slideshow. As instances it is two calls per exhibit however
+ * many cubes it has, and the park stays at framerate on a laptop driving a
+ * projector.
+ *
+ * The cubes are drawn a hair under full size. The seam is only a centimetre,
+ * but it catches the light along every edge and is the difference between
+ * reading as a sculpture built out of blocks and reading as one melted lump.
+ */
+function voxelMeshes(structure) {
+  const { solid, glow } = shadeVoxels(structure.voxels, structure.palette);
+  const meshes = [];
+
+  // Lambert for the body: it takes the sun, and the baked occlusion is already
+  // in the instance colours. Basic for the glow, which is its own light source
+  // and should not dim on whichever side of the park it ended up facing.
+  if (solid.length) meshes.push(instancedCubes(solid, new THREE.MeshLambertMaterial(), true));
+  if (glow.length) meshes.push(instancedCubes(glow, new THREE.MeshBasicMaterial(), false));
+
+  return meshes;
+}
+
+function instancedCubes(cells, material, shadows) {
+  const geometry = new THREE.BoxGeometry(VOXEL * 0.97, VOXEL * 0.97, VOXEL * 0.97);
+  const mesh = new THREE.InstancedMesh(geometry, material, cells.length);
+  const matrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+
+  cells.forEach((cell, index) => {
+    matrix.makeTranslation(cell.x, cell.y, cell.z);
+    mesh.setMatrixAt(index, matrix);
+    mesh.setColorAt(index, color.set(cell.color));
+  });
+
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.castShadow = shadows;
+  mesh.receiveShadow = shadows;
+  return mesh;
+}
 
 function geometryFor(part) {
   switch (part.shape) {

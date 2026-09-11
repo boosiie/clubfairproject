@@ -1,6 +1,7 @@
 /**
- * Tests for the three things that keep the booth safe and standing:
- * the structure clamps, the blocklist, and the offline generator.
+ * Tests for the four things that keep the booth safe and standing:
+ * the structure clamps, the voxel grid, the blocklist, and the offline
+ * generator.
  *
  * Run with `npm test`. No API key and no network needed.
  */
@@ -21,6 +22,7 @@ import {
   MAX_PARTS,
   STRUCTURE_MAX,
 } from '../public/js/spec.js';
+import { GRID, VOXEL, shadeVoxels, voxelBounds } from '../public/js/voxel.js';
 import { screen, REDACTED_STRUCTURE } from '../server/moderation.js';
 import {
   buildFromPrompt,
@@ -37,6 +39,145 @@ const part = (over = {}) => ({
   rotationX: 0, rotationY: 0, rotationZ: 0,
   color: '#ff0000',
   ...over,
+});
+
+/* ---------- the voxel grid ---------- */
+
+/** Every (x, y, z) in a normalised structure, as "x,y,z" strings. */
+const cellsOf = (structure) => {
+  const out = new Set();
+  for (let i = 0; i < structure.voxels.length; i += 4) {
+    out.add(`${structure.voxels[i]},${structure.voxels[i + 1]},${structure.voxels[i + 2]}`);
+  }
+  return out;
+};
+
+const sculpture = (over = {}) => normalizeStructure({
+  label: 'test',
+  symmetry: 'mirror',
+  palette: [{ key: 'A', color: '#ff0000', glow: false }, { key: 'B', color: '#00ff00', glow: true }],
+  layers: [{ y: 0, rows: ['AA.'] }],
+  ...over,
+});
+
+test('a structure from primitive parts still comes out as voxels', () => {
+  const built = normalizeStructure({ label: 'statue', parts: [part({ width: 2, height: 3, depth: 2, offsetY: 1.5 })] });
+  assert.ok(built.voxels.length >= 4, 'rasterised nothing');
+  assert.equal(built.voxels.length % 4, 0, 'voxels are flat quads of x, y, z, palette');
+  assert.ok(built.palette.length >= 1);
+});
+
+test('every path out of normalizeStructure carries voxels and a palette', () => {
+  for (const input of [null, {}, { parts: [] }, { layers: [] }, { label: 'x' }, REDACTED_STRUCTURE]) {
+    const built = normalizeStructure(input);
+    assert.ok(built.voxels.length >= 4, `no voxels for ${JSON.stringify(input)}`);
+    assert.ok(built.palette.length >= 1, `no palette for ${JSON.stringify(input)}`);
+  }
+});
+
+test('a mirrored sculpture is symmetric about the centre line', () => {
+  const cells = cellsOf(sculpture({ layers: [{ y: 0, rows: ['A.A', '.AA'] }, { y: 1, rows: ['AA.'] }] }));
+  for (const cell of cells) {
+    const [x, y, z] = cell.split(',').map(Number);
+    assert.ok(cells.has(`${GRID.width - 1 - x},${y},${z}`), `${cell} has no mirror`);
+  }
+});
+
+test('layers stay registered with each other, whatever their row counts', () => {
+  // A one-row layer over a five-row layer: centring each layer on its own would
+  // slide the top one into the middle of the bottom one.
+  const built = sculpture({
+    symmetry: 'none',
+    layers: [{ y: 0, rows: ['AAAA', 'A..A', 'A..A', 'A..A', 'AAAA'] }, { y: 1, rows: ['AAAA'] }],
+  });
+  const cells = cellsOf(built);
+  const top = [...cells].map((c) => c.split(',').map(Number)).filter(([, y]) => y === 1);
+  assert.equal(top.length, 4, 'the top layer did not stay four wide');
+  // The whole sculpture is centred once, so the indices shift together - what
+  // has to hold is that each top cube still sits on a bottom one.
+  for (const [x, , z] of top) {
+    assert.ok(cells.has(`${x},0,${z}`), 'the top layer slid off the front of the bottom one');
+  }
+});
+
+test('a sculpture rests on the ground and stays inside the grid', () => {
+  const built = sculpture({ layers: [{ y: 9, rows: ['AA.'] }, { y: 14, rows: ['AA.'] }] });
+  let minY = Infinity;
+  for (let i = 0; i < built.voxels.length; i += 4) {
+    const [x, y, z] = [built.voxels[i], built.voxels[i + 1], built.voxels[i + 2]];
+    minY = Math.min(minY, y);
+    assert.ok(x >= 0 && x < GRID.width, `x ${x} off the grid`);
+    assert.ok(y >= 0 && y < GRID.height, `y ${y} off the grid`);
+    assert.ok(z >= 0 && z < GRID.depth, `z ${z} off the grid`);
+  }
+  assert.equal(minY, 0, 'the sculpture is floating');
+});
+
+test('nothing escapes its plot, however far the model paints', () => {
+  const built = sculpture({
+    symmetry: 'none',
+    layers: Array.from({ length: GRID.height + 6 }, (_, y) => ({ y, rows: Array(GRID.depth + 6).fill('A'.repeat(GRID.width + 6)) })),
+  });
+  const bounds = voxelBounds(built.voxels);
+  assert.ok(bounds.width <= STRUCTURE_MAX.width + 0.01, `${bounds.width}m wide`);
+  assert.ok(bounds.height <= STRUCTURE_MAX.height + 0.01, `${bounds.height}m tall`);
+  assert.ok(bounds.depth <= STRUCTURE_MAX.depth + 0.01, `${bounds.depth}m deep`);
+});
+
+test('a character with no palette entry is painted, not left as a hole', () => {
+  // A model that slips and uses a key it never declared should not punch a
+  // window through the middle of the build.
+  const built = sculpture({ layers: [{ y: 0, rows: ['AQA'] }] });
+  assert.equal(built.voxels.length / 4, 6, 'the stray character was dropped');
+});
+
+test('dots and spaces are empty space, and an empty painting falls back to parts', () => {
+  assert.equal(sculpture({ layers: [{ y: 0, rows: ['A.A'] }] }).voxels.length / 4, 4);
+  // All dots paints nothing at all, so the structure has to come from its parts.
+  const blank = normalizeStructure({ label: 'blank', layers: [{ y: 0, rows: ['....'] }] });
+  assert.ok(blank.voxels.length >= 4, 'an all-dots painting left an empty plot');
+});
+
+test('survives hostile layers and palettes without throwing', () => {
+  const hostile = [
+    { layers: 'not an array', palette: 'nope' },
+    { layers: [null, 7, { y: 'x', rows: ['A'] }, { y: 0, rows: [null, 5, 'A'] }] },
+    { layers: [{ y: 0, rows: ['A'] }], palette: [{ key: 5, color: {} }, null, 'x'] },
+    { layers: [{ y: -99, rows: ['A'] }], symmetry: 12 },
+    { layers: [{ y: 0, rows: ['A'] }], palette: [{ key: 'A', color: '#fff' }, { key: 'A', color: '#000' }] },
+  ];
+  for (const input of hostile) {
+    const built = normalizeStructure(input);
+    assert.ok(Array.isArray(built.voxels), `threw or lost voxels on ${JSON.stringify(input)}`);
+    assert.ok(built.palette.every((entry) => /^#[0-9a-f]{6}$/.test(entry.color)), 'a colour escaped normalisation');
+  }
+});
+
+test('buried cubes are never drawn, and glowing ones are never shaded', () => {
+  // A solid 3x3x3 has exactly one cube nobody can ever see.
+  const rows = ['AAA', 'AAA', 'AAA'];
+  const solid = normalizeStructure({
+    label: 'cube', symmetry: 'none',
+    palette: [{ key: 'A', color: '#ff0000', glow: false }],
+    layers: [{ y: 0, rows }, { y: 1, rows }, { y: 2, rows }],
+  });
+  const drawn = shadeVoxels(solid.voxels, solid.palette);
+  assert.equal(solid.voxels.length / 4, 27);
+  assert.equal(drawn.solid.length, 26, 'the buried centre cube was drawn');
+  assert.ok(drawn.solid.some((cell) => cell.color !== '#ff0000'), 'no occlusion shading was applied');
+
+  const lit = sculpture({ layers: [{ y: 0, rows: ['BBB'] }] });
+  const glow = shadeVoxels(lit.voxels, lit.palette);
+  assert.equal(glow.solid.length, 0);
+  assert.ok(glow.glow.every((cell) => cell.color === '#00ff00'), 'a glowing cube was shaded');
+});
+
+test('voxel bounds are measured in metres, not in grid steps', () => {
+  const built = sculpture({ symmetry: 'none', layers: [{ y: 0, rows: ['AA'] }, { y: 1, rows: ['AA'] }] });
+  const bounds = voxelBounds(built.voxels);
+  assert.equal(bounds.width, 2 * VOXEL);
+  assert.equal(bounds.height, 2 * VOXEL);
+  assert.equal(bounds.depth, 1 * VOXEL);
 });
 
 /* ---------- structure clamping ---------- */

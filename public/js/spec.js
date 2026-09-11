@@ -4,10 +4,15 @@
  * Imported by BOTH the Node server and the browser, so a structure can never be
  * clamped one way on the server and another way in the world.
  *
- * A creation is a STRUCTURE: a label plus up to eight parts. Parts are boxes,
- * spheres, cylinders and cones, which is deliberately the Roblox palette - you
- * can read "a statue" or "a dragon" out of a handful of blocks, and every build
- * is different because nothing is coming from a fixed model catalogue.
+ * A creation is a VOXEL SCULPTURE: a label, a small colour palette, and a few
+ * hundred cubes on a fixed grid. The model paints the cubes directly, layer by
+ * layer. Everything that does not come from the model - the offline generator,
+ * the nonsense block, the redacted block - still describes itself in primitive
+ * solids, and those are rasterised into the very same grid, so there is one
+ * thing to render and no second tier of quality when the wifi drops.
+ *
+ * Primitive parts therefore survive here as an INTERMEDIATE form, not as the
+ * output. Everything that leaves this file carries `palette` and `voxels`.
  *
  * The safety story lives here: the model's only channel to the screen is this
  * schema. Every field is validated and clamped. Nothing it returns is rendered
@@ -16,6 +21,13 @@
  *
  * Units are metres. A person is about 1.8 tall.
  */
+
+import {
+  GRID, VOXEL, MAX_PALETTE,
+  cellsFromLayers, cellsFromParts, placeCells, voxelBounds,
+} from './voxel.js';
+
+export { GRID, VOXEL, MAX_PALETTE };
 
 export const SHAPES = ['box', 'sphere', 'cylinder', 'cone'];
 
@@ -163,6 +175,68 @@ function normalizePart(raw, seed, index) {
 }
 
 /**
+ * Coerce a palette into at most MAX_PALETTE entries of a normalised colour and
+ * a glow flag, plus the character-to-index map the layer painter reads.
+ *
+ * Always returns at least one entry: an empty palette would leave every voxel
+ * with nothing to be coloured.
+ */
+export function normalizePalette(input, seed = 'palette') {
+  const rows = Array.isArray(input) ? input.slice(0, MAX_PALETTE) : [];
+  const palette = [];
+  const keyToIndex = new Map();
+
+  rows.forEach((row, index) => {
+    const source = row && typeof row === 'object' ? row : {};
+    const key = typeof source.key === 'string' ? [...source.key.trim()][0] : undefined;
+
+    palette.push({
+      color: normalizeColor(source.color, `${seed}:${index}`),
+      glow: source.glow === true,
+    });
+    // First writer wins, so a palette that reuses a character does not silently
+    // repaint everything already drawn with it.
+    if (key && !keyToIndex.has(key)) keyToIndex.set(key, index);
+  });
+
+  if (!palette.length) palette.push({ color: normalizeColor(null, seed), glow: false });
+  return { palette, keyToIndex };
+}
+
+/**
+ * Build the voxels for a structure, from whichever description it arrived with.
+ *
+ * Layers are the model's channel and win when present. Anything else - the
+ * offline generator, the canned blocks, a hand-written literal - is rasterised
+ * from its primitive parts, so it comes out of the same grid and renders
+ * through the same path.
+ */
+function sculpt(raw, fitted, label) {
+  const layers = Array.isArray(raw.layers) && raw.layers.length ? raw.layers : null;
+
+  if (layers) {
+    const { palette, keyToIndex } = normalizePalette(raw.palette, label);
+    const mirrored = raw.symmetry !== 'none';
+    const voxels = placeCells(cellsFromLayers(layers, keyToIndex, mirrored), { centerX: !mirrored });
+    // A layer set that painted nothing at all - all dots, or all unreadable -
+    // would leave an empty plot, so fall through to the parts it also carries.
+    if (voxels.length) return { palette, voxels };
+  }
+
+  const bounds = structureBounds(fitted);
+  const palette = fitted.parts.map((part) => ({ color: part.color, glow: false }));
+  const voxels = placeCells(
+    cellsFromParts(fitted.parts, {
+      centerX: (bounds.minX + bounds.maxX) / 2,
+      centerZ: (bounds.minZ + bounds.maxZ) / 2,
+    }),
+    { centerX: true },
+  );
+
+  return { palette: palette.length ? palette : [{ color: '#8f8f8f', glow: false }], voxels };
+}
+
+/**
  * Coerce anything - a model tool call, a cached pack entry, a hand-written
  * literal - into a structure that is safe to build.
  * Never throws, never returns null, always returns something buildable.
@@ -174,12 +248,14 @@ export function normalizeStructure(input) {
   const partsIn = Array.isArray(raw.parts) && raw.parts.length ? raw.parts : [{}];
   const parts = partsIn.slice(0, MAX_PARTS).map((part, i) => normalizePart(part, label, i));
 
-  return fitStructure({
+  const fitted = fitStructure({
     label,
     subject: SUBJECTS.includes(raw.subject) ? raw.subject : 'object',
     bounciness: round(num(raw.bounciness, LIMITS.bounciness)),
     parts,
   });
+
+  return { ...fitted, ...sculpt(raw, fitted, label) };
 }
 
 /**
