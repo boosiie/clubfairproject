@@ -258,7 +258,69 @@ app.post('/api/build', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+/**
+ * Ask whoever already owns the port who they are.
+ *
+ * The failure this prevents is nasty and silent: an older copy of the booth is
+ * still running from an earlier session, the new one cannot take the port, and
+ * the browser goes on being served the OLD app - so you update, restart,
+ * reload, and keep seeing the previous version with nothing to explain why.
+ *
+ * Asking over HTTP rather than probing the socket means we can also say WHICH
+ * build is squatting, which is the part that actually resolves the confusion.
+ */
+async function whoIsOnPort(port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/status`, {
+      signal: AbortSignal.timeout(900),
+    });
+    return { busy: true, status: await response.json().catch(() => ({})) };
+  } catch {
+    // Nothing answering, or it is not one of ours. Either way, try to bind.
+    return { busy: false };
+  }
+}
+
+function reportPortTaken(status) {
+  // Three cases worth telling apart: we recognised it as this build, we
+  // recognised it as one of ours but older, or we could not identify it at all
+  // (the socket was taken but nothing answered our status request).
+  let theirs;
+  if (!status) theirs = 'something we could not identify - an older build, or another program entirely';
+  else if (status.renderer === '3d') theirs = `another copy of THIS build (v${status.version})`;
+  else theirs = 'an OLDER build of this booth';
+
+  console.error(`
+  PORT ${PORT} IS ALREADY IN USE
+
+  Something is already listening on port ${PORT}, and it is ${theirs}.
+  Your browser is being served by THAT one - which is why it can still look
+  like the old version no matter how many times you update and reload.
+
+  Close the other terminal window, or kill it:
+
+    Windows (PowerShell)
+      npx kill-port ${PORT}
+    or, to find it by hand:
+      netstat -ano | findstr :${PORT}
+      taskkill /PID <the number in the last column> /F
+
+    macOS / Linux
+      npx kill-port ${PORT}
+
+  Then start this one again. To see which build is answering at any time:
+      http://localhost:${PORT}/api/status
+  The current build reports  renderer: 3d
+`);
+}
+
+const occupant = await whoIsOnPort(PORT);
+if (occupant.busy) {
+  reportPortTaken(occupant.status);
+  process.exit(1);
+}
+
+const server = app.listen(PORT, () => {
   console.log(`\n  Amusement park running:   http://localhost:${PORT}`);
   console.log(`  Build:                    3D first-person v${version}`);
   console.log(`  Mode:                     ${OFFLINE ? 'OFFLINE - built locally, no network' : MODEL}`);
@@ -272,6 +334,13 @@ app.listen(PORT, () => {
   } else {
     console.log('\n  No ANTHROPIC_API_KEY found - everything is built locally.');
     console.log('  Copy .env.example to .env and add a key for live generation,');
-    console.log('  or set OFFLINE=1 to make this the intended mode.\n');
+    console.log('  or pass --offline to make this the intended mode.\n');
   }
+});
+
+// Backstop: something else grabbed the port between the check and the bind.
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') reportPortTaken(null);
+  else console.error(`\n  Could not start: ${error.message}\n`);
+  process.exit(1);
 });
