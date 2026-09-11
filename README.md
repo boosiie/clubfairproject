@@ -277,12 +277,22 @@ limits sprawls into the neighbour's plot. Every structure is scaled as a whole
 Rotated parts are measured by their swept box on whichever axes they turn, or a
 wheel laid on its side is measured as if it were still flat.
 
-**The floor is doing a job, not decorating.** It's white with a thin dark grid,
-like a Wii menu. A plain white plane has no scale and no landmarks, so walking
-forwards on one looks exactly like standing still. Everything on it — the
-boulevard, the plot squares — is painted flat rather than built up: raised slabs
-covered the bottom two thirds of the screen and left the grid visible only as a
-smudge near the horizon.
+**The floor is doing a job, not decorating.** It's white with a thin slate
+grid. A plain white plane has no scale and no landmarks, so walking forwards on
+one looks exactly like standing still. Everything on it — the boulevard, the
+plot squares — is painted flat rather than built up: raised slabs covered the
+bottom two thirds of the screen and left the grid visible only as a smudge near
+the horizon. The markings are thin, pale and unlit, so they read as lines on a
+diagram rather than paint on tarmac; wide dark ones read as kerbs.
+
+**The park is meant to feel like the inside of a cloud service** — haze in every
+direction, data drifting up through the air, racks of something enormous just
+out of focus at the edges. All of it is flat colour, fog and one sprite: a
+gradient sky dome, ~500 drifting points, and a ring of unlit boxes and drums
+(a stack of drums being what a database has looked like in every diagram ever
+drawn). There isn't a single shader, because it has to hold 60fps on a school
+laptop with integrated graphics. The fog colour and the bottom of the sky
+gradient are the same, which is what hides the edge where the floor runs out.
 
 **Light intensity in three.js is divided by pi.** The lights were tuned against
 a green floor at 1.5/1.6, which sums to about 0.65 at a surface facing straight

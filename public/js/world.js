@@ -60,9 +60,11 @@ const MAX_PITCH = 1.45;
 const GRID_METRES = 2;
 const FLOOR_SIZE = 240;
 const FLOOR_COLOR = 0xffffff;
-const GRID_INK = '#141821';
+/** Slate-blue rather than black. A black grid is the heaviest thing on screen
+ *  and drags the floor back towards tarmac; this reads as ruled paper. */
+const GRID_INK = '#2b4463';
 /** What the floor bounces back up. Near-white, because the floor is. */
-const BOUNCE_COLOR = 0xeef1f6;
+const BOUNCE_COLOR = 0xeef3f8;
 /**
  * Everything on the floor is PAINTED on, never built up.
  *
@@ -70,13 +72,33 @@ const BOUNCE_COLOR = 0xeef1f6;
  * boulevard they covered the bottom two thirds of the screen - so the grid,
  * which is the only thing telling you that you are moving, was visible only as
  * a smudge near the horizon. Flat markings read exactly as well and leave the
- * floor showing everywhere, which is also what a Wii court actually looks like.
+ * floor showing everywhere.
+ *
+ * Thin and unlit, so they read as lines drawn on a diagram rather than as paint
+ * on tarmac. A wide dark one looks like a kerb; this looks like a schematic.
  */
-const ROAD_LINE = 0xa9bacd;
-const PLOT_LINE = 0x3f4d68;
+const ROAD_LINE = 0x8ed3ee;
+const PLOT_LINE = 0x3fb2e0;
 /** Width of a painted stripe, in metres. */
-const LINE_WIDTH = 0.35;
-const SKY_COLOR = 0xbfdcf2;
+const LINE_WIDTH = 0.14;
+
+/**
+ * The place you are walking through is meant to read as the inside of a cloud
+ * service: a white schematic floor, haze in every direction, data rising
+ * through the air, and racks of something enormous just out of focus at the
+ * edges. All of it is flat colour and fog - there is not one shader here,
+ * because it has to hold 60fps on a school laptop with integrated graphics.
+ */
+const SKY_HIGH = '#74bfe6';
+const SKY_MID = '#c4e6f7';
+const SKY_LOW = '#f0fafe';
+/** What everything fades into. Matches the bottom of the sky, so there is no
+ *  visible seam where the floor runs out. */
+const HAZE_COLOR = 0xe4f3fb;
+const DATA_COLOR = 0x3ba9d8;
+const RACK_COLOR = 0x8fc4dd;
+/** How high the motes drift before they wrap back to the floor. */
+const MOTE_CEILING = 26;
 
 export class World {
   constructor(container, options = {}) {
@@ -96,8 +118,10 @@ export class World {
     this.autoYaw = null;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(SKY_COLOR);
-    this.scene.fog = new THREE.Fog(SKY_COLOR, 80, 190);
+    // Haze starts well before the far plots, so the boulevard has depth rather
+    // than ending in a hard edge, and the floor runs out inside the haze where
+    // you cannot see it happen.
+    this.scene.fog = new THREE.Fog(HAZE_COLOR, 45, 135);
 
     // 75 degrees is the usual first-person field of view; the third-person
     // toggle narrows it back to 58.
@@ -111,8 +135,11 @@ export class World {
     container.appendChild(this.renderer.domElement);
 
     this.buildLighting();
+    this.buildSky();
     this.buildGround();
     this.buildPlots();
+    this.buildHorizon();
+    this.buildMotes();
     this.buildPlayer();
 
     this.resize();
@@ -154,6 +181,96 @@ export class World {
     sun.shadow.bias = -0.0015;
     this.scene.add(sun);
     this.scene.add(sun.target);
+  }
+
+  /**
+   * A gradient dome instead of a flat background colour.
+   *
+   * A single flat colour gives the sky no up, so the horizon is a hard line and
+   * the whole thing reads as a room with a painted wall. The gradient puts the
+   * pale end at the horizon where the fog is, which is what makes the floor
+   * look like it dissolves into distance rather than stopping.
+   */
+  buildSky() {
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(300, 24, 16),
+      new THREE.MeshBasicMaterial({
+        map: makeSkyTexture(),
+        side: THREE.BackSide,
+        // Not fogged, or the sky fades into its own fog colour and goes flat.
+        fog: false,
+        depthWrite: false,
+      }),
+    );
+    this.scene.add(dome);
+  }
+
+  /**
+   * Racks of something enormous, ringed round the park and half lost in haze.
+   *
+   * The single strongest cue that you are inside a system rather than outdoors:
+   * flat silhouettes, no lighting, no shadows, arranged so that whichever way
+   * you turn there is more of it. Cylinders among the boxes because a stack of
+   * drums is what a database has looked like in every diagram ever drawn.
+   */
+  buildHorizon() {
+    const material = new THREE.MeshBasicMaterial({ color: RACK_COLOR });
+    const group = new THREE.Group();
+
+    for (let i = 0; i < 96; i++) {
+      const angle = (i / 96) * Math.PI * 2 + Math.random() * 0.05;
+      const radius = 76 + Math.random() * 40;
+      const height = 5 + Math.random() * 32;
+      const drum = Math.random() < 0.3;
+
+      const mesh = new THREE.Mesh(
+        drum
+          ? new THREE.CylinderGeometry(2.2, 2.2, height, 10)
+          : new THREE.BoxGeometry(2.5 + Math.random() * 5, height, 2.5 + Math.random() * 5),
+        material,
+      );
+      mesh.position.set(Math.sin(angle) * radius, height / 2, Math.cos(angle) * radius);
+      mesh.rotation.y = Math.random() * Math.PI;
+      group.add(mesh);
+    }
+
+    this.scene.add(group);
+  }
+
+  /** Data drifting up through the air. Wraps back to the floor at the ceiling. */
+  buildMotes() {
+    const count = 480;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 130;
+      positions[i * 3 + 1] = Math.random() * MOTE_CEILING;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 170;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    this.motes = new THREE.Points(geometry, new THREE.PointsMaterial({
+      map: makeMoteTexture(),
+      color: DATA_COLOR,
+      size: 0.3,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.8,
+      // Off, or every mote punches a hole in whatever is behind it.
+      depthWrite: false,
+    }));
+    this.scene.add(this.motes);
+  }
+
+  stepMotes(delta) {
+    const { array } = this.motes.geometry.attributes.position;
+    for (let i = 1; i < array.length; i += 3) {
+      // A spread of speeds, so it drifts rather than moving as one sheet.
+      array[i] += delta * (0.3 + (i % 11) * 0.05);
+      if (array[i] > MOTE_CEILING) array[i] -= MOTE_CEILING;
+    }
+    this.motes.geometry.attributes.position.needsUpdate = true;
   }
 
   buildGround() {
@@ -232,7 +349,9 @@ export class World {
 
     const post = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.07, 2.1, 8),
-      new THREE.MeshLambertMaterial({ color: 0x6b5b45 }),
+      // Steel rather than the wood it used to be: a timber signpost in a data
+      // centre was the one thing in shot still pretending to be outdoors.
+      new THREE.MeshLambertMaterial({ color: 0xa8bfd2 }),
     );
     post.position.y = -0.55;
     post.castShadow = true;
@@ -422,6 +541,7 @@ export class World {
     const now = this.clock.elapsedTime;
 
     this.stepExhibits(delta, now);
+    this.stepMotes(delta);
     this.stepAutoTurn(delta);
     this.stepPlayer(delta);
     this.stepCamera(delta);
@@ -744,6 +864,45 @@ function makeBlockAvatar() {
  * line where tiles meet, giving a grid of alternating thick and thin lines that
  * looks like a rendering bug.
  */
+/** The sky, as a one-pixel-wide vertical gradient stretched over the dome. */
+function makeSkyTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+
+  // Sphere UVs put v=1 at the north pole, and flipY maps that to the top of the
+  // image - so the first stop is straight overhead and the last is underfoot.
+  const sky = ctx.createLinearGradient(0, 0, 0, 256);
+  sky.addColorStop(0, SKY_HIGH);
+  sky.addColorStop(0.52, SKY_MID);
+  sky.addColorStop(0.78, SKY_LOW);
+  sky.addColorStop(1, SKY_LOW);
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 2, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** A soft round dot for the drifting motes. A bare point sprite is a square. */
+function makeMoteTexture() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  const dot = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  dot.addColorStop(0, 'rgba(255,255,255,1)');
+  dot.addColorStop(0.45, 'rgba(255,255,255,0.75)');
+  dot.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = dot;
+  ctx.fillRect(0, 0, size, size);
+
+  return new THREE.CanvasTexture(canvas);
+}
+
 function makeGridTexture() {
   // 256 rather than 128 for the mipmaps: the line has to survive being shrunk
   // to a couple of pixels twenty metres out, and a low-resolution tile fades to
@@ -759,9 +918,9 @@ function makeGridTexture() {
   // 10px of a 256px cell spanning two metres is a line about 8cm wide, which is
   // the width of a real painted floor line and reads at every distance.
   ctx.fillStyle = GRID_INK;
-  ctx.globalAlpha = 0.8;
-  ctx.fillRect(0, 0, size, 10);
-  ctx.fillRect(0, 0, 10, size);
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(0, 0, size, 8);
+  ctx.fillRect(0, 0, 8, size);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -838,9 +997,11 @@ function makeMemeTexture(text) {
   canvas.height = height;
   const ctx = canvas.getContext('2d');
 
+  // Dark slate, so the card reads as a panel switched on in the middle of the
+  // park rather than a piece of something else pasted into it.
   const back = ctx.createLinearGradient(0, 0, width * 0.4, height);
-  back.addColorStop(0, '#5b6058');
-  back.addColorStop(1, '#33372f');
+  back.addColorStop(0, '#33455c');
+  back.addColorStop(1, '#161e2a');
   ctx.fillStyle = back;
   ctx.fillRect(0, 0, width, height);
 
@@ -953,12 +1114,12 @@ function makeTextTexture(text, ink, background) {
 function stripe(width, depth, x, z, color) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(width, 0.02, depth),
-    new THREE.MeshLambertMaterial({ color }),
+    // Unlit, so a line is the exact colour it was given wherever it runs. Lit,
+    // a thin pale line loses most of its contrast the moment it crosses a
+    // shadow, and the marking it is drawing disappears in patches.
+    new THREE.MeshBasicMaterial({ color }),
   );
   mesh.position.set(x, 0.011, z);
-  // Takes shadow but casts none, so a line running under an exhibit darkens
-  // with the floor around it instead of glowing through the shadow.
-  mesh.receiveShadow = true;
   return mesh;
 }
 
