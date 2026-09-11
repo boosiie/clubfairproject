@@ -33,15 +33,20 @@
     <!-- A crosshair is most of what makes first person read as first person. -->
     <div id="crosshair" aria-hidden="true"></div>
 
-    <header class="hud hud--top">
+    <header class="hud hud--top" id="topbar">
       <div class="brand">
         <span class="brand__mark" id="club-mark">AI CLUB</span>
         <h1 class="brand__line">Walk around. Build anything.</h1>
       </div>
-      <dl class="counters">
-        <div><dt>built today</dt><dd id="stat-total">0</dd></div>
-        <div><dt>plots used</dt><dd id="stat-plots">0<span class="counters__of">/12</span></dd></div>
-      </dl>
+      <div class="topbar__right">
+        <dl class="counters">
+          <div><dt>built today</dt><dd id="stat-total">0</dd></div>
+          <div><dt>plots used</dt><dd id="stat-plots">0<span class="counters__of">/12</span></dd></div>
+        </dl>
+        <!-- Deliberately plain and off to the side. This is for whoever is
+             running the booth, not for the queue. It asks twice. -->
+        <button class="clear" id="clear" type="button">clear park</button>
+      </div>
     </header>
 
     <div class="stage" id="stage">
@@ -57,7 +62,7 @@
           type="text"
           name="prompt"
           maxlength="140"
-          placeholder="a giant purple dragon"
+          placeholder="press Enter, then type anything"
           aria-label="Describe what to build in this plot"
           spellcheck="false"
         />
@@ -75,13 +80,22 @@
       </div>
     </div>
 
+    <!-- Two sets, because the keyboard does two different jobs and only ever
+         one of them at a time. Which set is showing IS the mode indicator. -->
     <footer class="controls" id="controls">
-      <span class="controls__group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
-      <span class="controls__group"><kbd>Shift</kbd> run</span>
-      <span class="controls__group"><kbd>Space</kbd> jump</span>
-      <span class="controls__group">click or drag to look</span>
-      <span class="controls__group"><kbd>V</kbd> <span id="view-mode">first person</span></span>
-      <span class="controls__group"><kbd>Enter</kbd> build here</span>
+      <span class="controls__set controls__set--walk">
+        <span class="controls__group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
+        <span class="controls__group"><kbd>Shift</kbd> run</span>
+        <span class="controls__group"><kbd>Space</kbd> jump</span>
+        <span class="controls__group">click or drag to look</span>
+        <span class="controls__group"><kbd>V</kbd> <span id="view-mode">first person</span></span>
+        <span class="controls__group controls__group--lead"><kbd>Enter</kbd> type something</span>
+      </span>
+      <span class="controls__set controls__set--type">
+        <span class="controls__group controls__group--lead">typing &mdash; every key is a letter</span>
+        <span class="controls__group"><kbd>Enter</kbd> build it here</span>
+        <span class="controls__group"><kbd>Esc</kbd> back to walking</span>
+      </span>
     </footer>
 
     <div class="pill" id="pill" hidden></div>

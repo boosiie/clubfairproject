@@ -38,6 +38,10 @@ const els = {
   controls: document.getElementById('controls'),
   pill: document.getElementById('pill'),
   buildtag: document.getElementById('buildtag'),
+  header: document.getElementById('topbar'),
+  stage: document.getElementById('stage'),
+  clear: document.getElementById('clear'),
+  plotcard: document.getElementById('plotcard'),
 };
 
 /**
@@ -176,7 +180,13 @@ async function build(prompt) {
     inFlight = false;
     els.go.disabled = false;
     els.input.value = '';
-    els.input.focus();
+    // Back to walking mode, with nothing left holding focus. You have just
+    // built something and the view has turned to watch it land - the next thing
+    // anyone wants is to walk over to it, not to type again, and Enter puts you
+    // back in the box. Blurring whatever was clicked matters as much as the
+    // box: a preset button that keeps focus turns the next Space - which is
+    // jump - into a second press of itself.
+    document.activeElement?.blur();
   }
 }
 
@@ -189,9 +199,46 @@ async function build(prompt) {
  */
 const signNodes = new Map();
 
+/**
+ * Roughly how much room one sign takes. Approximate on purpose: measuring the
+ * real node means reading layout in the same frame we write transforms, which
+ * forces a reflow on every sign on every frame. Labels are capped at thirty
+ * characters, so a fixed box is close enough and costs nothing.
+ */
+const SIGN_WIDTH = 210;
+const SIGN_HEIGHT = 34;
+
+/**
+ * Where the chrome is, so signs can be kept off it.
+ *
+ * Measured on a timer rather than per frame, for the same reflow reason - the
+ * header and the stage only change size when the window does or when the plot
+ * card's text changes, neither of which is a per-frame event.
+ */
+let chromeBoxes = [];
+
+function measureChrome() {
+  chromeBoxes = [els.header, els.stage, els.controls]
+    .filter(Boolean)
+    .map((node) => node.getBoundingClientRect());
+}
+
+function onChrome(x, y) {
+  // The sign hangs upward from its anchor point, hence the -SIGN_HEIGHT.
+  const half = SIGN_WIDTH / 2;
+  return chromeBoxes.some((box) => x + half > box.left && x - half < box.right
+    && y > box.top && y - SIGN_HEIGHT < box.bottom);
+}
+
+window.addEventListener('resize', measureChrome);
+measureChrome();
+
 function refreshSigns() {
   const seen = new Set();
 
+  // Gather first, place second. Placing needs to know about the other signs,
+  // and the nearest one has to be the one that keeps its spot.
+  const placing = [];
   for (const exhibit of world.exhibits) {
     if (exhibit.removing) continue;
     const at = world.projectLabel(exhibit);
@@ -208,11 +255,35 @@ function refreshSigns() {
       els.signs.appendChild(node);
       signNodes.set(exhibit, node);
     }
+    placing.push({ node, at });
+  }
 
-    node.style.transform = `translate(-50%, -100%) translate(${at.x}px, ${at.y}px)`;
-    // Fade distant signs instead of letting the far end of the park turn into a
-    // wall of overlapping text.
-    node.style.opacity = at.depth > 0.995 ? '0' : '1';
+  placing.sort((a, b) => a.at.depth - b.at.depth);
+
+  const placed = [];
+  for (const { node, at } of placing) {
+    let y = at.y;
+
+    // Two exhibits in one plot put their signs on top of each other. Walk this
+    // one upwards until it is clear of everything already placed - nearest
+    // first, so the sign for the thing you are standing next to stays put and
+    // the ones behind it move out of its way.
+    for (let i = 0; i < placed.length + 1; i++) {
+      const clash = placed.find((other) => Math.abs(other.x - at.x) < SIGN_WIDTH
+        && Math.abs(other.y - y) < SIGN_HEIGHT);
+      if (!clash) break;
+      y = clash.y - SIGN_HEIGHT;
+    }
+
+    node.style.transform = `translate(-50%, -100%) translate(${at.x}px, ${y}px)`;
+    // Hidden rather than moved when it lands on the chrome: there is nowhere
+    // else for it to go, and a label printed across the club's name or the box
+    // people are meant to type into makes the screen look broken from the far
+    // side of a gym. Distant signs go too, or the far end of the park turns
+    // into a wall of overlapping text.
+    const hidden = at.depth > 0.995 || onChrome(at.x, y);
+    node.style.opacity = hidden ? '0' : '1';
+    if (!hidden) placed.push({ x: at.x, y });
   }
 
   for (const [exhibit, node] of signNodes) {
@@ -258,7 +329,45 @@ function refreshCounters() {
 setInterval(() => {
   refreshCounters();
   refreshPlotCard();
+  // The plot card grows and shrinks with what is in the plot, which moves the
+  // bottom of the chrome that signs have to stay out of.
+  measureChrome();
 }, 1000);
+
+/* ---------- clearing the park ---------- */
+
+/** How long the clear button stays armed before it forgets it was asked. */
+const CLEAR_ARMED_MS = 4000;
+let clearTimer = null;
+
+function disarmClear() {
+  clearTimeout(clearTimer);
+  clearTimer = null;
+  els.clear.classList.remove('clear--armed');
+  els.clear.textContent = 'clear park';
+}
+
+els.clear.addEventListener('click', () => {
+  markInteraction();
+
+  if (clearTimer) {
+    disarmClear();
+    world.clearAll();
+    refreshCounters();
+    refreshPlotCard();
+  } else {
+    const live = world.liveCount;
+    if (!live) return;
+    // Two presses. One stray click on a booth screen would otherwise wipe out
+    // forty people's builds, with no warning and nothing to undo it with.
+    els.clear.classList.add('clear--armed');
+    els.clear.textContent = `clear all ${live}?`;
+    clearTimer = setTimeout(disarmClear, CLEAR_ARMED_MS);
+  }
+
+  // Or the button keeps focus and the next Space - which is jump - presses it.
+  els.clear.blur();
+});
 
 /* ---------- input ---------- */
 
@@ -278,6 +387,34 @@ const MOVE_KEYS = {
 
 const held = new Set();
 
+/**
+ * The keyboard belongs to exactly one of two modes, never to both.
+ *
+ * Sharing it does not work, and the attempt to share it is why you could not
+ * type the word "dragon": the D arrived while the box was still empty, so it
+ * was read as a movement key, swallowed before the box ever saw it, and you
+ * strafed right instead of typing a letter. Any rule based on what is already
+ * in the box has that hole at the first keystroke, and the first keystroke is
+ * the one that matters.
+ *
+ * So: focus in the box means every key is text. Focus anywhere else means every
+ * key drives the walker. Enter crosses between them in both directions, and
+ * Escape always gets you out - at a booth there has to be one key that works
+ * from any state a visitor has managed to reach.
+ */
+function isTyping() {
+  return document.activeElement === els.input;
+}
+
+/** Stop dead. A key held across a mode change never gets its keyup. */
+function stopMoving() {
+  held.clear();
+  turning.clear();
+  world.input.run = false;
+  world.input.jump = false;
+  applyMovement();
+}
+
 function applyMovement() {
   let forward = 0;
   let strafe = 0;
@@ -290,12 +427,36 @@ function applyMovement() {
   world.input.strafe = Math.sign(strafe);
 }
 
+// Every route into the box goes through focus - clicking it, tabbing to it, or
+// being sent there by Enter - so the mode is switched here rather than at each
+// of those call sites, and cannot get out of step with where focus actually is.
+els.input.addEventListener('focus', () => {
+  stopMoving();
+  releasePointer();
+  document.body.classList.add('typing');
+});
+
+els.input.addEventListener('blur', () => document.body.classList.remove('typing'));
+
 document.addEventListener('keydown', (event) => {
   markInteraction();
 
   if (event.code === 'Escape') {
     els.input.value = '';
+    els.input.blur();
     releasePointer();
+    return;
+  }
+
+  // Typing mode owns the whole keyboard: no walking, no jumping, no view
+  // toggle. This is the fix - nothing below this line runs while the box has
+  // focus, so W, A, S and D are letters like any others.
+  if (isTyping()) return;
+
+  // Enter is the way in. The form's submit handler is the way back out.
+  if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+    event.preventDefault();
+    els.input.focus();
     return;
   }
 
@@ -307,20 +468,13 @@ document.addEventListener('keydown', (event) => {
   }
 
   // V swaps between standing in the park and watching yourself walk through it.
-  if (event.code === 'KeyV' && els.input.value.length === 0) {
+  if (event.code === 'KeyV') {
     event.preventDefault();
     setViewLabel(world.toggleView());
     return;
   }
 
-  // Letters move the avatar only while the box is empty. The moment someone
-  // starts typing a word, the letters are letters again - arrow keys keep
-  // working either way so you can always walk.
-  const typing = els.input.value.length > 0;
-  const isLetter = event.code.startsWith('Key');
-  const move = MOVE_KEYS[event.code];
-
-  if (move && !(isLetter && typing)) {
+  if (MOVE_KEYS[event.code]) {
     event.preventDefault();
     held.add(event.code);
     applyMovement();
@@ -333,7 +487,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (event.code === 'Space' && !typing) {
+  if (event.code === 'Space') {
     event.preventDefault();
     world.input.jump = true;
     markWalked();
@@ -350,12 +504,7 @@ document.addEventListener('keyup', (event) => {
 });
 
 // Losing focus mid-stride would leave the avatar walking forever.
-window.addEventListener('blur', () => {
-  held.clear();
-  turning.clear();
-  applyMovement();
-  world.input.run = false;
-});
+window.addEventListener('blur', stopMoving);
 
 function setViewLabel(firstPerson) {
   document.getElementById('view-mode').textContent = firstPerson ? 'first person' : 'third person';
@@ -399,9 +548,10 @@ els.world.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === els.world;
   document.body.classList.toggle('locked', locked);
-  // Clicking the canvas blurs the input. Put focus back so the next thing
-  // typed still lands in the box rather than nowhere.
-  if (locked) els.input.focus();
+  // Focus is deliberately NOT put back in the box here. Grabbing the pointer
+  // is someone saying they want to look around, and re-focusing the box would
+  // drop them into typing mode - where the keys they are about to press to walk
+  // do nothing at all.
 });
 
 document.addEventListener('mousemove', (event) => {
@@ -478,8 +628,11 @@ let attractIndex = 0;
 function attractTick() {
   if (Date.now() - lastInteraction < IDLE_AFTER_MS || inFlight) return;
   document.body.classList.add('idle');
-  // Hand the mouse back, so whoever walks up next can click things.
+  // Hand the mouse and the keyboard back, so whoever walks up next finds a
+  // station that can be clicked and walked rather than one half-way through
+  // somebody else's sentence.
   releasePointer();
+  els.input.blur();
 
   const empty = [];
   for (let i = 0; i < PLOT_COUNT; i++) if (!world.contentsOf(i).length) empty.push(i);
@@ -498,7 +651,9 @@ window.addEventListener('pagehide', () => clearInterval(attractTimer));
 
 window.addEventListener('load', () => world.resize());
 
-els.input.focus();
+// Opens in walking mode, not typing mode. You spawn on the road and have to
+// stand on a plot before you can build anything, so walking is the first thing
+// anybody needs - and the box says so until someone presses Enter.
 refreshCounters();
 refreshPlotCard();
 

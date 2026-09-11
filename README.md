@@ -298,14 +298,28 @@ bottom two thirds of the screen and left the grid visible only as a smudge near
 the horizon. The markings are thin, pale and unlit, so they read as lines on a
 diagram rather than paint on tarmac; wide dark ones read as kerbs.
 
-**The park is meant to feel like the inside of a cloud service** — haze in every
-direction, data drifting up through the air, racks of something enormous just
-out of focus at the edges. All of it is flat colour, fog and one sprite: a
-gradient sky dome, ~500 drifting points, and a ring of unlit boxes and drums
-(a stack of drums being what a database has looked like in every diagram ever
-drawn). There isn't a single shader, because it has to hold 60fps on a school
-laptop with integrated graphics. The fog colour and the bottom of the sky
-gradient are the same, which is what hides the edge where the floor runs out.
+**The park stands inside a server hall**, and the thing that makes it read as
+one is *regularity*. The first attempt used towers at random heights and random
+spacings, and it came out looking like a foggy Manhattan — because that is
+exactly what a skyline is. Hardware is the opposite: identical units on a fixed
+pitch with aisles between the rows. Same geometry, same height, same gaps.
+Nothing about the hall is random now — every rack is the same rack, and the drum
+stacks land on a fixed interval rather than wherever. That one change did more
+than anything else in the scene.
+
+The rest is haze and two textures: a gradient sky dome, ~500 points drifting up
+through the air and wrapping back to the floor, one rack face (bays, vents and
+status lights) shared by every cabinet, and one drum texture whose dark end
+bands give each drum in a stack its rim — without them three cylinders read as
+a single smooth pillar. A stack of drums is, after all, what a database has
+looked like in every diagram since about 1975.
+
+It is ~300 racks in **one draw call**: `InstancedMesh`, which is the difference
+between this being free and this being why a school laptop drops to 20fps.
+There isn't a single shader in the scene. The fog colour and the bottom of the
+sky gradient are the same value, and the fog goes fully opaque at 118 while the
+rack field stops at 120 — so the hall dissolves into haze instead of ending on
+a visible last row, and you never see the edge where the floor runs out.
 
 **Light intensity in three.js is divided by pi.** The lights were tuned against
 a green floor at 1.5/1.6, which sums to about 0.65 at a surface facing straight
@@ -314,6 +328,41 @@ given. You cannot see that on green. On white you can: it came out `#d2dadd`.
 1.7/1.9 sums to just under 1, so a white floor is white and an exhibit is the
 colour it was built in. The sky term is near-white too, because it is the
 floor's main light source and a blue light on a white floor makes a blue floor.
+
+**The keyboard belongs to one mode at a time.** Walking mode: WASD, Shift,
+Space, V, arrows. Typing mode: every key is a letter, and nothing moves. Enter
+crosses between them in both directions and Escape always gets you out — at a
+booth there has to be one key that works from any state a visitor has managed
+to reach. Which set of hints is showing along the bottom *is* the mode
+indicator.
+
+Sharing the keyboard does not work, and the attempt to share it was a real bug:
+the rule used to be "letters move you while the box is empty", so the D in
+"dragon" arrived while the box was still empty, got read as a movement key, and
+was swallowed before the box ever saw it. You strafed right instead of typing a
+letter. Any rule based on what is already in the box has that hole at the first
+keystroke, and the first keystroke is the one that matters.
+
+**Nothing may keep focus after a build.** A preset button that holds focus turns
+the next Space — which is jump — into a second press of itself. One
+`document.activeElement?.blur()` covers the box, the presets and Build it.
+
+**The chrome is bottom-anchored, and there is a test for it.** The prompt used
+to sit at a fixed percentage of the screen height while the key hints were
+anchored to the bottom, so the gap between them shrank with the window and they
+collided at 1366×768 — which is the commonest school-laptop panel there is.
+`scratchpad/overlap.mjs` walks five viewport sizes in both modes and asserts no
+two pieces of chrome intersect and nothing spills off an edge.
+
+**Exhibit signs are kept off the chrome and off each other.** A sign is hidden
+rather than moved when it lands on the header or the composer — there is nowhere
+else for it to go, and a label printed across the club's name makes the screen
+look broken from the far side of a gym. Signs that would overprint each other
+stack upward instead, nearest-first, so the one you are standing next to keeps
+its place. The collision box is a fixed approximation on purpose: measuring the
+real node means reading layout in the same frame we write transforms, which
+forces a reflow per sign per frame, and label soup was already the FPS
+bottleneck once.
 
 **Exhibits must have depth.** The whole point of 3D is walking round the back,
 and a flat cutout looks fine from the road and absurd from the side. There is a

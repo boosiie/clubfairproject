@@ -111,9 +111,26 @@ const SKY_LOW = '#f0fafe';
  *  visible seam where the floor runs out. */
 const HAZE_COLOR = 0xe4f3fb;
 const DATA_COLOR = 0x3ba9d8;
-const RACK_COLOR = 0x8fc4dd;
 /** How high the motes drift before they wrap back to the floor. */
 const MOTE_CEILING = 26;
+
+/**
+ * The rack hall. One cabinet, repeated on a fixed pitch in both directions.
+ *
+ * The sizes are a hall seen from inside it, not a room you could walk: a rack
+ * eleven metres tall reads as a cabinet from sixty metres away, where a real
+ * two-metre one would be a speck in the haze. The pitch is wider than the unit
+ * on both axes, which is what leaves the aisles.
+ */
+const RACK_W = 6;
+const RACK_H = 11;
+const RACK_D = 4;
+const RACK_PITCH_X = 15;
+const RACK_PITCH_Z = 10;
+/** Half-width of the field of racks. Matches the floor, so none hang off it. */
+const FIELD = 120;
+/** No racks closer than this to the middle. The walker is held inside 55. */
+const HALL_CLEARING = 68;
 
 export class World {
   constructor(container, options = {}) {
@@ -136,7 +153,9 @@ export class World {
     // Haze starts well before the far plots, so the boulevard has depth rather
     // than ending in a hard edge, and the floor runs out inside the haze where
     // you cannot see it happen.
-    this.scene.fog = new THREE.Fog(HAZE_COLOR, 45, 135);
+    // Fully hazed at 118, just inside where the rack field stops at 120, so the
+    // hall dissolves rather than ending on a visible last row.
+    this.scene.fog = new THREE.Fog(HAZE_COLOR, 40, 118);
 
     // 75 degrees is the usual first-person field of view; the third-person
     // toggle narrows it back to 58.
@@ -221,35 +240,77 @@ export class World {
   }
 
   /**
-   * Racks of something enormous, ringed round the park and half lost in haze.
+   * The hall the park is standing in: rack rows in every direction, out to the
+   * haze.
    *
-   * The single strongest cue that you are inside a system rather than outdoors:
-   * flat silhouettes, no lighting, no shadows, arranged so that whichever way
-   * you turn there is more of it. Cylinders among the boxes because a stack of
-   * drums is what a database has looked like in every diagram ever drawn.
+   * REGULARITY is the entire trick, and getting it wrong is what made the first
+   * attempt at this look like a city skyline. Buildings are all different
+   * heights at random spacings; hardware is identical units on a fixed pitch
+   * with aisles between the rows. Same geometry, same height, same gaps - and
+   * it stops being Manhattan and becomes a machine room. So nothing here is
+   * random: every rack is the same rack, and the drum stacks land on a fixed
+   * interval rather than wherever.
+   *
+   * Two draw calls for the whole hall. InstancedMesh renders all ~300 racks in
+   * one, which is the difference between this being free and this being the
+   * reason a school laptop drops to 20fps.
    */
   buildHorizon() {
-    const material = new THREE.MeshBasicMaterial({ color: RACK_COLOR });
-    const group = new THREE.Group();
+    const racks = [];
+    const drums = [];
 
-    for (let i = 0; i < 96; i++) {
-      const angle = (i / 96) * Math.PI * 2 + Math.random() * 0.05;
-      const radius = 76 + Math.random() * 40;
-      const height = 5 + Math.random() * 32;
-      const drum = Math.random() < 0.3;
+    for (let ix = -FIELD; ix <= FIELD; ix += RACK_PITCH_X) {
+      for (let iz = -FIELD; iz <= FIELD; iz += RACK_PITCH_Z) {
+        // Keep clear of the park itself, with room to spare beyond the fence
+        // the walker is held inside - you should be able to stand at the edge
+        // and look down an aisle, not have your face against a cabinet.
+        if (Math.abs(ix) < HALL_CLEARING && Math.abs(iz) < HALL_CLEARING) continue;
+        // The corners reach past where the floor stops. Everything out there is
+        // solid haze anyway, so it is only cost.
+        if (Math.hypot(ix, iz) > FIELD) continue;
 
-      const mesh = new THREE.Mesh(
-        drum
-          ? new THREE.CylinderGeometry(2.2, 2.2, height, 10)
-          : new THREE.BoxGeometry(2.5 + Math.random() * 5, height, 2.5 + Math.random() * 5),
-        material,
-      );
-      mesh.position.set(Math.sin(angle) * radius, height / 2, Math.cos(angle) * radius);
-      mesh.rotation.y = Math.random() * Math.PI;
-      group.add(mesh);
+        const column = Math.round(ix / RACK_PITCH_X);
+        const row = Math.round(iz / RACK_PITCH_Z);
+        // Every seventh unit on the diagonal, so the stacks make a pattern
+        // across the floor rather than a scatter.
+        (Math.abs(column + row) % 7 === 0 ? drums : racks).push([ix, iz]);
+      }
     }
 
-    this.scene.add(group);
+    const place = (geometry, material, cells, forEach) => {
+      const mesh = new THREE.InstancedMesh(geometry, material, cells.length * forEach.length);
+      const at = new THREE.Object3D();
+      let i = 0;
+      for (const [x, z] of cells) {
+        for (const y of forEach) {
+          at.position.set(x, y, z);
+          at.updateMatrix();
+          mesh.setMatrixAt(i++, at.matrix);
+        }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      // Far outside the shadow camera, and a cast shadow at this distance would
+      // be a wasted depth pass nobody can see.
+      mesh.castShadow = false;
+      this.scene.add(mesh);
+    };
+
+    place(
+      new THREE.BoxGeometry(RACK_W, RACK_H, RACK_D),
+      new THREE.MeshLambertMaterial({ map: makeRackTexture() }),
+      racks,
+      [RACK_H / 2],
+    );
+
+    // Three drums to a stack, which is how a database has been drawn in every
+    // diagram since about 1975.
+    const drumHeight = RACK_H / 3.4;
+    place(
+      new THREE.CylinderGeometry(RACK_W / 2.2, RACK_W / 2.2, drumHeight, 14),
+      new THREE.MeshLambertMaterial({ map: makeDrumTexture() }),
+      drums,
+      [0.5, 1.5, 2.5].map((n) => n * drumHeight),
+    );
   }
 
   /** Data drifting up through the air. Wraps back to the floor at the ceiling. */
@@ -555,22 +616,40 @@ export class World {
     return exhibit;
   }
 
+  /** Start an exhibit fading out. `delay` staggers a group of them. */
+  retire(exhibit, delay = 0) {
+    if (exhibit.removing) return;
+    exhibit.removing = true;
+    exhibit.removeAt = this.clock.elapsedTime + FADE_SECONDS + delay;
+    exhibit.group.traverse((node) => {
+      if (!node.isMesh) return;
+      // Cloned so fading this copy does not fade every other exhibit sharing
+      // the material. The block face is an array of six, so handle both.
+      const fade = (material) => Object.assign(material.clone(), { transparent: true });
+      node.material = Array.isArray(node.material)
+        ? node.material.map(fade)
+        : fade(node.material);
+    });
+  }
+
   /** Keep each plot legible: past its capacity, the oldest exhibit fades out. */
   cullPlot(index) {
     const live = this.contentsOf(index);
-    for (let i = 0; i < live.length - PLOT_CAPACITY; i++) {
-      live[i].removing = true;
-      live[i].removeAt = this.clock.elapsedTime + FADE_SECONDS;
-      live[i].group.traverse((node) => {
-        if (!node.isMesh) return;
-        // Cloned so fading this copy does not fade every other exhibit sharing
-        // the material. The block face is an array of six, so handle both.
-        const fade = (material) => Object.assign(material.clone(), { transparent: true });
-        node.material = Array.isArray(node.material)
-          ? node.material.map(fade)
-          : fade(node.material);
-      });
-    }
+    for (let i = 0; i < live.length - PLOT_CAPACITY; i++) this.retire(live[i]);
+  }
+
+  /**
+   * Empty the park.
+   *
+   * Staggered rather than all at once: a whole park vanishing on one frame
+   * reads as a crash, and a sweep reads as something you did on purpose. The
+   * counters are deliberately NOT reset - "built today" is a tally of what the
+   * booth has done all day, and clearing the floor does not undo any of it.
+   */
+  clearAll() {
+    const live = this.exhibits.filter((exhibit) => !exhibit.removing);
+    live.forEach((exhibit, i) => this.retire(exhibit, i * 0.05));
+    return live.length;
   }
 
   /* ---------- per-frame ---------- */
@@ -630,7 +709,9 @@ export class World {
 
       if (exhibit.removing) {
         const remaining = Math.max(0, exhibit.removeAt - now);
-        const opacity = remaining / FADE_SECONDS;
+        // Clamped because a staggered clear sets removeAt further out than one
+        // fade, and the extra time would otherwise come through as opacity > 1.
+        const opacity = Math.min(1, remaining / FADE_SECONDS);
         exhibit.group.traverse((node) => {
           if (node.isMesh) for (const material of eachMaterial(node)) material.opacity = opacity;
         });
@@ -1091,6 +1172,81 @@ function makeSkyTexture() {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * The face of a rack: bays stacked up the cabinet, each with its own lights.
+ *
+ * One texture shared by every instance in the hall, which is why the detail is
+ * free. Close up it is a machine; from the far end of the boulevard it is just
+ * enough texture that the cabinets do not read as plain blocks.
+ */
+function makeRackTexture() {
+  const width = 64;
+  const height = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#39536e';
+  ctx.fillRect(0, 0, width, height);
+
+  const BAYS = 11;
+  const bay = height / BAYS;
+  for (let i = 0; i < BAYS; i++) {
+    const y = i * bay;
+    ctx.fillStyle = '#4a6a8c';
+    ctx.fillRect(3, y + 1.5, width - 6, bay - 3);
+
+    // A couple of lights per bay, always in the same place. Real hardware is
+    // identical unit to identical unit, and that is the whole point here.
+    ctx.fillStyle = '#8be6ff';
+    ctx.fillRect(7, y + bay / 2 - 1, 3, 2);
+    ctx.fillStyle = i % 3 === 0 ? '#9ff5c4' : '#8be6ff';
+    ctx.fillRect(13, y + bay / 2 - 1, 3, 2);
+
+    // Vents across the rest of the bay.
+    ctx.fillStyle = '#3d5978';
+    for (let v = 22; v < width - 6; v += 4) ctx.fillRect(v, y + bay / 2 - 1.5, 2, 3);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/**
+ * One drum of a stack.
+ *
+ * Three plain cylinders on top of each other read as a single smooth pillar,
+ * because there is nothing at the joins for the eye to catch. Cylinder UVs run
+ * v from the bottom edge to the top, so a dark band at each end of the texture
+ * gives every drum a rim and the stack its steps back.
+ */
+function makeDrumTexture() {
+  const width = 32;
+  const height = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#b3d4e6';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = '#6d97b3';
+  ctx.fillRect(0, 0, width, 5);
+  ctx.fillRect(0, height - 5, width, 5);
+
+  ctx.fillStyle = '#93bcd4';
+  ctx.fillRect(0, height * 0.45, width, 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
   return texture;
 }
 
