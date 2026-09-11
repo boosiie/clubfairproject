@@ -8,9 +8,10 @@
  *   2. The station is always ready for the next person. The input refocuses and
  *      clears itself, and the park keeps moving when nobody is there.
  *   3. Walking must never fight with typing. WASD drives the avatar while the
- *      box is empty and types letters the moment it is not, and nothing ever
- *      grabs the pointer - a pointer-locked booth is one where the next person
- *      cannot type at all.
+ *      box is empty and types letters the moment it is not. Pointer lock is
+ *      offered for real mouse look but never sticks: Escape releases it, the
+ *      prompt keeps keyboard focus throughout, and an idle station hands the
+ *      mouse back on its own.
  */
 
 import { normalizeStructure } from './spec.js';
@@ -108,7 +109,9 @@ async function build(prompt) {
   els.go.disabled = true;
 
   try {
-    world.build(await requestStructure(prompt), plot);
+    const exhibit = world.build(await requestStructure(prompt), plot);
+    // Turn to watch it land, or in first person you would never see it.
+    if (exhibit) world.faceTowards(exhibit.group.position.x, exhibit.group.position.z);
     refreshCounters();
     refreshPlotCard();
   } finally {
@@ -206,11 +209,13 @@ function markInteraction() {
   document.body.classList.remove('idle');
 }
 
+// Arrows turn rather than move - in first person, looking is the thing you do
+// constantly, and W/A/S/D already covers walking.
 const MOVE_KEYS = {
-  KeyW: ['forward', 1], ArrowUp: ['forward', 1],
-  KeyS: ['forward', -1], ArrowDown: ['forward', -1],
-  KeyA: ['strafe', -1], ArrowLeft: ['strafe', -1],
-  KeyD: ['strafe', 1], ArrowRight: ['strafe', 1],
+  KeyW: ['forward', 1],
+  KeyS: ['forward', -1],
+  KeyA: ['strafe', -1],
+  KeyD: ['strafe', 1],
 };
 
 const held = new Set();
@@ -232,6 +237,21 @@ document.addEventListener('keydown', (event) => {
 
   if (event.code === 'Escape') {
     els.input.value = '';
+    releasePointer();
+    return;
+  }
+
+  if (TURN_KEYS[event.code]) {
+    event.preventDefault();
+    turning.add(event.code);
+    markWalked();
+    return;
+  }
+
+  // V swaps between standing in the park and watching yourself walk through it.
+  if (event.code === 'KeyV' && els.input.value.length === 0) {
+    event.preventDefault();
+    setViewLabel(world.toggleView());
     return;
   }
 
@@ -263,6 +283,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('keyup', (event) => {
+  turning.delete(event.code);
   if (MOVE_KEYS[event.code]) {
     held.delete(event.code);
     applyMovement();
@@ -273,28 +294,97 @@ document.addEventListener('keyup', (event) => {
 // Losing focus mid-stride would leave the avatar walking forever.
 window.addEventListener('blur', () => {
   held.clear();
+  turning.clear();
   applyMovement();
   world.input.run = false;
 });
 
+function setViewLabel(firstPerson) {
+  document.getElementById('view-mode').textContent = firstPerson ? 'first person' : 'third person';
+}
+
+/* ---------- looking around ---------- */
+
+const LOOK_SENSITIVITY = 0.0024;
+
 /**
- * Drag to look around. Deliberately NOT pointer lock: locking the pointer means
- * the next person at the booth cannot click the box or press a preset without
- * first working out how to escape.
+ * Two ways to look, because first person needs proper mouse look and a booth
+ * needs to never strand anybody.
+ *
+ * Dragging always works and needs no explanation. Clicking the world grabs the
+ * pointer for real mouse look, which is the only way first person feels right -
+ * but a pointer that stays grabbed is exactly how the next person walks up and
+ * finds they cannot click anything. So: Escape releases it, the keyboard is
+ * untouched by the lock (the prompt keeps focus, so typing still works while
+ * looking around), and attract mode releases it on its own after the station
+ * has been idle. An abandoned booth always returns to a clickable state.
  */
+function releasePointer() {
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+
+/**
+ * How far the pointer may travel between press and release and still count as
+ * a click rather than a drag. Without this, every drag-to-look ends in a click
+ * event and silently grabs the pointer - so looking around once would leave the
+ * next person unable to press a button.
+ */
+const CLICK_SLOP_PX = 5;
+let pressedAt = null;
+
+els.world.addEventListener('click', () => {
+  if (document.pointerLockElement || !pressedAt) return;
+  if (pressedAt.moved > CLICK_SLOP_PX) return;
+  els.world.requestPointerLock?.();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  const locked = document.pointerLockElement === els.world;
+  document.body.classList.toggle('locked', locked);
+  // Clicking the canvas blurs the input. Put focus back so the next thing
+  // typed still lands in the box rather than nowhere.
+  if (locked) els.input.focus();
+});
+
+document.addEventListener('mousemove', (event) => {
+  if (document.pointerLockElement !== els.world) return;
+  world.look(event.movementX * LOOK_SENSITIVITY, event.movementY * LOOK_SENSITIVITY);
+  markInteraction();
+});
+
 let dragging = null;
 els.world.addEventListener('pointerdown', (event) => {
-  dragging = { x: event.clientX, yaw: world.orbit };
+  pressedAt = { x: event.clientX, y: event.clientY, moved: 0 };
+  if (document.pointerLockElement) return;
+  dragging = { x: event.clientX, y: event.clientY };
   els.world.setPointerCapture(event.pointerId);
   markInteraction();
 });
 els.world.addEventListener('pointermove', (event) => {
+  if (pressedAt) {
+    pressedAt.moved = Math.max(
+      pressedAt.moved,
+      Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y),
+    );
+  }
   if (!dragging) return;
-  world.orbit = dragging.yaw - (event.clientX - dragging.x) * 0.006;
+  world.look((event.clientX - dragging.x) * LOOK_SENSITIVITY, (event.clientY - dragging.y) * LOOK_SENSITIVITY);
+  dragging = { x: event.clientX, y: event.clientY };
 });
 const endDrag = () => { dragging = null; };
 els.world.addEventListener('pointerup', endDrag);
 els.world.addEventListener('pointercancel', endDrag);
+
+/** Arrow keys turn, for anyone who will not touch the mouse at all. */
+const TURN_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+const turning = new Set();
+
+setInterval(() => {
+  for (const code of turning) {
+    const [yaw, pitch] = TURN_KEYS[code];
+    world.look(yaw * 0.045, pitch * 0.03);
+  }
+}, 16);
 
 function markWalked() {
   if (hasWalked) return;
@@ -330,6 +420,8 @@ let attractIndex = 0;
 function attractTick() {
   if (Date.now() - lastInteraction < IDLE_AFTER_MS || inFlight) return;
   document.body.classList.add('idle');
+  // Hand the mouse back, so whoever walks up next can click things.
+  releasePointer();
 
   const empty = [];
   for (let i = 0; i < PLOT_COUNT; i++) if (!world.contentsOf(i).length) empty.push(i);
@@ -351,3 +443,4 @@ window.addEventListener('load', () => world.resize());
 els.input.focus();
 refreshCounters();
 refreshPlotCard();
+

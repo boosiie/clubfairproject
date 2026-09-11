@@ -410,3 +410,25 @@ body.idle {
   50% { transform: translateX(7px); }
   75% { transform: translateX(-4px); }
 }
+
+/* ---------- first-person crosshair ---------- */
+
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* With the pointer grabbed the cursor is gone, so the canvas should stop
+   advertising that it can be dragged. */
+body.locked #world canvas {
+  cursor: none;
+}

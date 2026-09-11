@@ -46,6 +46,10 @@ const EYE_TURN_RATE = 9;
  */
 const CAMERA_DISTANCE = 10;
 const CAMERA_HEIGHT = 2.7;
+/** Eye height for first person. A touch below the top of the head. */
+const EYE_HEIGHT = 1.62;
+/** Just short of straight up and down - past vertical the world flips over. */
+const MAX_PITCH = 1.45;
 
 const GROUND_COLOR = 0x5ea45f;
 const ROAD_COLOR = 0x8d8a7e;
@@ -63,14 +67,20 @@ export class World {
     this.currentPlot = -1;
     this.clock = new THREE.Clock();
     this.input = { forward: 0, strafe: 0, run: false, jump: false };
-    this.cameraYaw = 0;
-    this.orbit = 0;
+    /** Where you are looking. Shared by the camera and by which way is forward. */
+    this.yaw = 0;
+    this.pitch = 0;
+    this.firstPerson = true;
+    /** Set while the view is easing round to watch a new exhibit land. */
+    this.autoYaw = null;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(SKY_COLOR);
     this.scene.fog = new THREE.Fog(SKY_COLOR, 80, 190);
 
-    this.camera = new THREE.PerspectiveCamera(58, 1, 0.1, 400);
+    // 75 degrees is the usual first-person field of view; the third-person
+    // toggle narrows it back to 58.
+    this.camera = new THREE.PerspectiveCamera(75, 1, 0.1, 400);
     this.cameraTarget = new THREE.Vector3();
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -222,6 +232,7 @@ export class World {
     // A placeholder body so the booth works the instant the page opens, even
     // before the model has loaded - and forever, if the file is missing.
     this.placeholder = makeBlockAvatar();
+    this.placeholder.visible = !this.firstPerson;
     this.player.add(this.placeholder);
 
     new GLTFLoader().load(
@@ -249,6 +260,7 @@ export class World {
     this.player.add(model);
     this.avatar = model;
 
+    model.visible = !this.firstPerson;
     this.mixer = new THREE.AnimationMixer(model);
     this.actions = {};
     for (const clip of gltf.animations) {
@@ -361,6 +373,7 @@ export class World {
     const now = this.clock.elapsedTime;
 
     this.stepExhibits(delta, now);
+    this.stepAutoTurn(delta);
     this.stepPlayer(delta);
     this.stepCamera(delta);
     if (this.mixer) this.mixer.update(delta);
@@ -422,28 +435,59 @@ export class World {
     }
   }
 
+  stepAutoTurn(delta) {
+    if (this.autoYaw === null || this.autoYaw === undefined) return;
+    // Walking is deliberate input too - it means they have moved on.
+    if (this.input.forward || this.input.strafe) {
+      this.autoYaw = null;
+      return;
+    }
+
+    const diff = wrapAngle(this.autoYaw - this.yaw);
+    if (Math.abs(diff) < 0.02) {
+      this.yaw = this.autoYaw;
+      this.autoYaw = null;
+      return;
+    }
+    this.yaw = wrapAngle(this.yaw + diff * Math.min(1, 5 * delta));
+  }
+
   stepPlayer(delta) {
     const { input } = this;
     const moving = input.forward !== 0 || input.strafe !== 0;
     const speed = input.run ? RUN_SPEED : WALK_SPEED;
 
     if (moving) {
-      // Movement is relative to where the camera is looking, which is what
-      // everyone expects from a third-person game and needs no mouse at all.
-      const angle = Math.atan2(input.strafe, input.forward) + this.cameraYaw;
+      // Movement is relative to where you are looking. three's camera looks
+      // down -Z at yaw 0, so forward is (-sin, -cos) and right is its
+      // perpendicular - getting these the wrong way round is how you end up
+      // walking backwards out of your own park.
+      const forwardX = -Math.sin(this.yaw);
+      const forwardZ = -Math.cos(this.yaw);
+      const rightX = Math.cos(this.yaw);
+      const rightZ = -Math.sin(this.yaw);
+
+      let dx = forwardX * input.forward + rightX * input.strafe;
+      let dz = forwardZ * input.forward + rightZ * input.strafe;
+      // Normalise so walking diagonally is not faster than walking straight.
+      const length = Math.hypot(dx, dz) || 1;
+      dx /= length;
+      dz /= length;
+
       const step = speed * delta;
       const next = this.player.position.clone();
-      next.x += Math.sin(angle) * step;
-      next.z += Math.cos(angle) * step;
+      next.x += dx * step;
+      next.z += dz * step;
 
       this.resolveCollisions(next);
       this.player.position.x = next.x;
       this.player.position.z = next.z;
 
-      this.facing = angle;
+      this.facing = Math.atan2(dx, dz);
     }
 
-    // Turn towards the direction of travel rather than snapping.
+    // Turn the body towards the direction of travel rather than snapping. Only
+    // visible in third person, but cheap enough to keep running either way.
     const diff = wrapAngle(this.facing - this.player.rotation.y);
     this.player.rotation.y += diff * Math.min(1, EYE_TURN_RATE * delta);
 
@@ -502,20 +546,72 @@ export class World {
   }
 
   stepCamera(delta) {
-    this.cameraYaw += wrapAngle(this.orbit - this.cameraYaw) * Math.min(1, 6 * delta);
+    const { position } = this.player;
 
-    const target = this.player.position.clone();
-    target.y += PLAYER_HEIGHT * 0.85;
+    if (this.firstPerson) {
+      // Rigidly attached to the head. No smoothing at all: lerping a
+      // first-person camera reads as motion sickness, not as smoothness.
+      this.camera.position.set(position.x, position.y + EYE_HEIGHT, position.z);
+      this.camera.rotation.order = 'YXZ';
+      this.camera.rotation.set(this.pitch, this.yaw, 0);
+      return;
+    }
 
+    const target = new THREE.Vector3(position.x, position.y + PLAYER_HEIGHT * 0.85, position.z);
     const wanted = new THREE.Vector3(
-      target.x - Math.sin(this.cameraYaw) * CAMERA_DISTANCE,
-      target.y + CAMERA_HEIGHT,
-      target.z - Math.cos(this.cameraYaw) * CAMERA_DISTANCE,
+      target.x + Math.sin(this.yaw) * CAMERA_DISTANCE * Math.cos(this.pitch),
+      target.y + CAMERA_HEIGHT - Math.sin(this.pitch) * CAMERA_DISTANCE,
+      target.z + Math.cos(this.yaw) * CAMERA_DISTANCE * Math.cos(this.pitch),
     );
 
+    this.camera.rotation.set(0, 0, 0);
     this.camera.position.lerp(wanted, Math.min(1, 7 * delta));
     this.cameraTarget.lerp(target, Math.min(1, 10 * delta));
     this.camera.lookAt(this.cameraTarget);
+  }
+
+  /**
+   * Swap between standing in the park and watching yourself walk through it.
+   *
+   * First person is the default because it is what the place is for. Third
+   * person exists because the avatar is a real animated model and it is worth
+   * being able to see it - Roblox lets you do both, for the same reason.
+   */
+  toggleView() {
+    this.firstPerson = !this.firstPerson;
+    this.camera.fov = this.firstPerson ? 75 : 58;
+    this.camera.updateProjectionMatrix();
+    this.setAvatarVisible(!this.firstPerson);
+    return this.firstPerson;
+  }
+
+  setAvatarVisible(visible) {
+    if (this.avatar) this.avatar.visible = visible;
+    if (this.placeholder) this.placeholder.visible = visible;
+  }
+
+  /**
+   * Turn to watch something. Called when you build, because in first person you
+   * are usually facing down the road and the exhibit lands off to one side -
+   * you would type, hear it land, and see nothing. The turn is eased rather
+   * than snapped, and it takes about as long as the drop.
+   */
+  faceTowards(x, z) {
+    const dx = x - this.player.position.x;
+    const dz = z - this.player.position.z;
+    if (Math.hypot(dx, dz) < 0.2) return;
+    this.autoYaw = Math.atan2(-dx, -dz);
+  }
+
+  /** Turn the view. Both the drag handler and pointer lock feed into this. */
+  look(deltaYaw, deltaPitch) {
+    // Any deliberate input wins over the turn-to-watch; nothing is more
+    // irritating than a camera arguing with your hand.
+    this.autoYaw = null;
+    this.yaw = wrapAngle(this.yaw - deltaYaw);
+    // Stop just short of straight up and down: going past vertical flips the
+    // world over and there is no way for a visitor to work out what happened.
+    this.pitch = clamp(this.pitch - deltaPitch, -MAX_PITCH, MAX_PITCH);
   }
 
   resize() {

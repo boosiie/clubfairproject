@@ -30,6 +30,8 @@
     <!-- Exhibit signs are HTML, positioned each frame over the 3D view. Cheaper
          than text geometry and always crisp on a projector. -->
     <div id="signs" aria-hidden="true"></div>
+    <!-- A crosshair is most of what makes first person read as first person. -->
+    <div id="crosshair" aria-hidden="true"></div>
 
     <header class="hud hud--top">
       <div class="brand">
@@ -77,7 +79,8 @@
       <span class="controls__group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk</span>
       <span class="controls__group"><kbd>Shift</kbd> run</span>
       <span class="controls__group"><kbd>Space</kbd> jump</span>
-      <span class="controls__group">drag to look</span>
+      <span class="controls__group">click or drag to look</span>
+      <span class="controls__group"><kbd>V</kbd> <span id="view-mode">first person</span></span>
       <span class="controls__group"><kbd>Enter</kbd> build here</span>
     </footer>
 

@@ -21,8 +21,9 @@ rather than an environment variable specifically so that `npm run offline`
 works in Windows cmd and PowerShell, where `OFFLINE=1 node ...` is a syntax
 error.)
 
-**Controls:** `WASD` to walk, `Shift` to run, `Space` to jump, drag the mouse
-to look around, `Enter` to build on the plot you are standing on.
+**Controls:** `WASD` to walk, `Shift` to run, `Space` to jump, click or drag to
+look around, arrow keys to turn without a mouse, `V` to switch between first
+and third person, `Enter` to build on the plot you are standing on.
 
 ---
 
@@ -37,6 +38,11 @@ Roblox palette, and it is a deliberate choice over a catalogue of downloaded
 models: a catalogue means the fortieth person gets the same tree as the twelfth,
 and "type anything" stops being true. Primitives keep every build unique and
 match the blocky look.
+
+**First person by default**, with `V` to drop back to third. You are in the
+park, at eye height, and a six-metre dragon landing next to you reads as six
+metres. Third person exists because the avatar is a real animated model and it
+is worth being able to see it - Roblox offers both for the same reason.
 
 **One downloaded model: the avatar** (`public/models/RobotExpressive.glb`, CC0,
 by Quaternius). That is where a real model earns its place - it arrives with
@@ -217,9 +223,9 @@ of the daily budget is left.
 
 ## The things that will bite you
 
-**Camera pitch is the whole feel.** The rig is about 15 degrees down. Raise it
-much past that and it stops reading as standing behind someone and turns into
-an isometric strategy game looking at a doll. It was wrong first.
+**Camera pitch is the whole feel** in third person. The rig is about 15 degrees
+down; raise it much past that and it stops reading as standing behind someone
+and turns into an isometric strategy game looking at a doll. It was wrong first.
 
 **Where you spawn matters more than it sounds.** Spawning at the end of the
 boulevard meant the first thing anyone did was walk forty metres before
@@ -237,9 +243,19 @@ wheel laid on its side is measured as if it were still flat.
 and a flat cutout looks fine from the road and absurd from the side. There is a
 test asserting every archetype is at least 0.6m deep.
 
-**No pointer lock.** It is the obvious way to do mouse look and it is wrong for
-a booth: the next person walks up and cannot click the box. Drag to look
-instead.
+**Pointer lock that cannot strand anybody.** Real mouse look needs the pointer
+grabbed, and a grabbed pointer is exactly how the next person walks up and finds
+they cannot click anything. So it is offered but never sticks: Escape releases
+it, the prompt keeps keyboard focus the whole time (so typing still works while
+you look around), and an idle station hands the mouse back on its own. Dragging
+works without ever grabbing it - and a drag is told apart from a click by
+whether the pointer moved more than five pixels, because otherwise every look
+around ends in a click event and silently locks.
+
+**You have to be turned to face what you built.** In first person you are
+normally looking down the road, and the exhibit lands off to one side: you would
+type, hear it land, and see nothing. The view eases round to watch it, over
+about as long as the drop takes, and any deliberate input cancels the turn.
 
 ---
 
