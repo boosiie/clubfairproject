@@ -22,6 +22,16 @@ import { generateStructure, describeError, isConfigured, MODEL } from './claude.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
 
+// Load .env here rather than with a --env-file flag in the npm script: the
+// if-exists form of that flag needs Node 22.9, and a club laptop is as likely
+// to have Node 20 LTS on it. Throws when there is no .env, which is the normal
+// case for a booth running on the offline pack.
+try {
+  process.loadEnvFile(path.join(root, '.env'));
+} catch {
+  // No .env - the server falls back to the offline pack and says so at startup.
+}
+
 const PORT = Number(process.env.PORT || 3000);
 /** Longest prompt we will pay for. Also shrinks the prompt-injection surface. */
 const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH || 140);

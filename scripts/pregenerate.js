@@ -24,6 +24,13 @@ import { generateStructure, describeError, isConfigured, MODEL } from '../server
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const target = path.join(root, 'public/data/fallback.json');
 
+// Same as the server: load .env in code so this runs on Node 20 LTS too.
+try {
+  process.loadEnvFile(path.join(root, '.env'));
+} catch {
+  // No .env - main() reports the missing key and exits.
+}
+
 /**
  * Prompts chosen to cover what a crowd actually types at a park booth: rides,
  * architecture, creatures, food, and the generic "a statue of <someone>" that

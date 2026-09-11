@@ -1,16 +1,16 @@
 {
-  "name": "clubfair-physics-sandbox",
+  "name": "clubfair-park",
   "version": "1.0.0",
-  "description": "Club fair booth demo: students type anything, the model returns a constrained JSON object spec, and it falls into a shared 2D physics world that never resets.",
+  "description": "Club fair booth demo: a walkable 2D amusement park where students type anything and the model builds it into a plot of land.",
   "type": "module",
   "engines": {
-    "node": ">=20.6"
+    "node": ">=20.12"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env server/index.js",
-    "dev": "node --env-file-if-exists=.env --watch server/index.js",
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
     "mock": "MOCK=1 node server/index.js",
-    "pregenerate": "node --env-file-if-exists=.env scripts/pregenerate.js",
+    "pregenerate": "node scripts/pregenerate.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
