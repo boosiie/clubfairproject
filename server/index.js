@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeStructure } from '../public/js/spec.js';
-import { pickFromPack, jitter } from '../public/js/pack.js';
+import { buildFromPrompt } from '../public/js/offline.js';
 import { screen, REDACTED_STRUCTURE, ANONYMOUS_LABEL, blocklistSize } from './moderation.js';
 import { generateStructure, describeError, isConfigured, MODEL } from './claude.js';
 
@@ -41,8 +41,28 @@ const MIN_INTERVAL_MS = Number(process.env.MIN_INTERVAL_MS || 1200);
 const MAX_CALLS_PER_MINUTE = Number(process.env.MAX_CALLS_PER_MINUTE || 40);
 /** Hard spend guard for the day. Past this the pack takes over, silently. */
 const MAX_CALLS_PER_DAY = Number(process.env.MAX_CALLS_PER_DAY || 1500);
-/** Set MOCK=1 to run the whole booth with no API key at all. */
-const MOCK = process.env.MOCK === '1' || !isConfigured();
+/**
+ * Never touch the network at all.
+ *
+ * Set OFFLINE=1 when the venue blocks the API - a school network usually
+ * does. Everything is then built locally: the hand-authored pack for things it
+ * knows, and the generator in offline.js for everything else. MOCK=1 is the
+ * older name for the same switch.
+ */
+const OFFLINE = process.env.OFFLINE === '1' || process.env.MOCK === '1' || !isConfigured();
+
+/**
+ * Circuit breaker for a network that is present but blocked.
+ *
+ * A firewall that drops traffic to the API does not fail fast - it hangs until
+ * the timeout, twice, every single build. After a couple of those we stop
+ * asking for a while and serve locally, which turns a booth where every build
+ * takes ten seconds into one where only the first two do.
+ */
+const BREAKER_THRESHOLD = 2;
+const BREAKER_COOLDOWN_MS = 5 * 60_000;
+let consecutiveFailures = 0;
+let skipApiUntil = 0;
 
 /**
  * What to do when the model says an exhibit depicts a real, identifiable person
@@ -98,8 +118,13 @@ function budgetAvailable(clientId) {
   return { ok: true };
 }
 
-function fromPack(prompt) {
-  return jitter(pickFromPack(pack, prompt));
+/**
+ * Build without the network. Offline there is no model to classify whether a
+ * prompt names a real person, so anything but `allow` keeps typed text off the
+ * signs entirely rather than guessing.
+ */
+function buildLocally(prompt) {
+  return buildFromPrompt(pack, prompt, { anonymise: REAL_PEOPLE !== 'allow' });
 }
 
 const app = express();
@@ -113,8 +138,9 @@ app.use('/vendor', express.static(path.join(root, 'node_modules/matter-js/build'
 
 app.get('/api/status', (_req, res) => {
   res.json({
-    mock: MOCK,
-    model: MOCK ? null : MODEL,
+    offline: OFFLINE,
+    apiPaused: Date.now() < skipApiUntil,
+    model: OFFLINE ? null : MODEL,
     realPeople: REAL_PEOPLE,
     blocklistSize,
     packSize: pack.structures.length,
@@ -133,7 +159,7 @@ app.post('/api/build', async (req, res) => {
   stats.builds += 1;
 
   if (!prompt) {
-    return res.json({ structure: normalizeStructure(fromPack('')), source: 'fallback', note: 'empty prompt' });
+    return res.json({ structure: normalizeStructure(buildLocally('')), source: 'fallback', note: 'empty prompt' });
   }
 
   // 1. Screen the input before spending anything on it. A troll gets a grey box
@@ -143,15 +169,18 @@ app.post('/api/build', async (req, res) => {
     return res.json({ structure: normalizeStructure(REDACTED_STRUCTURE), source: 'blocked' });
   }
 
-  // 2. No key, mock mode, rate limited, or out of budget: use the pack. The
-  //    response shape is identical, so the park cannot tell the difference.
+  // 2. Offline, no key, rate limited, out of budget, or the API has been
+  //    failing: build it here. The response shape is identical, so the park
+  //    cannot tell the difference.
   const budget = budgetAvailable(clientId);
-  if (MOCK || !budget.ok) {
+  const breakerOpen = Date.now() < skipApiUntil;
+  if (OFFLINE || breakerOpen || !budget.ok) {
     stats.fallbacks += 1;
+    const local = buildLocally(prompt);
     return res.json({
-      structure: normalizeStructure(fromPack(prompt)),
+      structure: normalizeStructure(local),
       source: 'fallback',
-      note: MOCK ? 'mock mode' : budget.why,
+      note: OFFLINE ? `offline (${local.source})` : breakerOpen ? 'api unreachable' : budget.why,
     });
   }
 
@@ -163,6 +192,7 @@ app.post('/api/build', async (req, res) => {
     stats.modelCalls += 1;
     stats.inputTokens += usage.input_tokens;
     stats.outputTokens += usage.output_tokens;
+    consecutiveFailures = 0;
 
     const normalized = normalizeStructure(structure);
 
@@ -190,24 +220,41 @@ app.post('/api/build', async (req, res) => {
     return res.json({ structure: normalized, source: 'model' });
   } catch (err) {
     stats.errors += 1;
-    console.warn(`[build] ${describeError(err)} - falling back to pack`);
-    return res.json({ structure: normalizeStructure(fromPack(prompt)), source: 'fallback', note: 'api unavailable' });
+    consecutiveFailures += 1;
+
+    if (consecutiveFailures >= BREAKER_THRESHOLD) {
+      skipApiUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      console.warn(
+        `[build] ${describeError(err)} - ${consecutiveFailures} failures in a row, ` +
+        `building locally for the next ${BREAKER_COOLDOWN_MS / 60_000} minutes. ` +
+        'Set OFFLINE=1 if this venue blocks the API.',
+      );
+    } else {
+      console.warn(`[build] ${describeError(err)} - building locally`);
+    }
+
+    return res.json({
+      structure: normalizeStructure(buildLocally(prompt)),
+      source: 'fallback',
+      note: 'api unavailable',
+    });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`\n  Amusement park running:   http://localhost:${PORT}`);
-  console.log(`  Mode:                     ${MOCK ? 'MOCK (offline pack only, no API calls)' : MODEL}`);
+  console.log(`  Mode:                     ${OFFLINE ? 'OFFLINE - built locally, no network' : MODEL}`);
   console.log(`  Offline pack:             ${pack.structures.length} structures`);
   console.log(`  Blocklist:                ${blocklistSize} terms`);
   console.log(`  Real people:              ${REAL_PEOPLE}`);
 
-  if (!MOCK) {
+  if (!OFFLINE) {
     console.log(`  Daily call budget:        ${MAX_CALLS_PER_DAY}\n`);
-  } else if (process.env.MOCK === '1') {
-    console.log('\n  MOCK=1 - no API calls will be made.\n');
+  } else if (process.env.OFFLINE === '1' || process.env.MOCK === '1') {
+    console.log('\n  Offline by choice - nothing will touch the network.\n');
   } else {
-    console.log('\n  No ANTHROPIC_API_KEY found - running on the offline pack.');
-    console.log('  Copy .env.example to .env and add a key for live generation.\n');
+    console.log('\n  No ANTHROPIC_API_KEY found - everything is built locally.');
+    console.log('  Copy .env.example to .env and add a key for live generation,');
+    console.log('  or set OFFLINE=1 to make this the intended mode.\n');
   }
 });

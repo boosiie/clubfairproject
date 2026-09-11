@@ -77,7 +77,7 @@ export function colorFromString(str) {
   return hslToHex(Math.abs(hash) % 360, 62, 58);
 }
 
-function hslToHex(h, s, l) {
+export function hslToHex(h, s, l) {
   s /= 100; l /= 100;
   const k = (n) => (n + h / 30) % 12;
   const a = s * Math.min(l, 1 - l);

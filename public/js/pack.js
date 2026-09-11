@@ -31,11 +31,25 @@ function tokenize(text) {
  * @returns {object} a raw structure - still needs normalizeStructure() before use
  */
 export function pickFromPack(pack, prompt = '') {
+  return matchPack(pack, prompt).structure;
+}
+
+/**
+ * The best pack entry *and how well it actually matched*.
+ *
+ * The score is what lets the offline builder decide between a hand-authored
+ * exhibit and a generated one: a strong hit on "ferris wheel" beats anything
+ * the generator will produce, and a score of zero means the pack has nothing
+ * to say about this prompt at all.
+ *
+ * @returns {{structure: object, score: number}}
+ */
+export function matchPack(pack, prompt = '') {
   const structures = pack?.structures ?? [];
-  if (!structures.length) return {};
+  if (!structures.length) return { structure: {}, score: 0 };
 
   const tokens = tokenize(prompt);
-  if (!tokens.length) return randomOf(structures);
+  if (!tokens.length) return { structure: randomOf(structures), score: 0 };
 
   let best = [];
   let bestScore = 0;
@@ -64,7 +78,9 @@ export function pickFromPack(pack, prompt = '') {
     }
   }
 
-  return bestScore > 0 ? randomOf(best) : randomOf(structures);
+  return bestScore > 0
+    ? { structure: randomOf(best), score: bestScore }
+    : { structure: randomOf(structures), score: 0 };
 }
 
 function randomOf(list) {

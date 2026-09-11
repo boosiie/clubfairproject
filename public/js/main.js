@@ -13,6 +13,7 @@
 
 import { normalizeStructure } from './spec.js';
 import { pickFromPack, jitter } from './pack.js';
+import { buildFromPrompt } from './offline.js';
 import { Park, PLOT_COUNT } from './park.js';
 
 /** Give up on the server well before it gives up on the API and use the pack. */
@@ -41,6 +42,8 @@ const park = new Park(els.world, {
 });
 
 let pack = { structures: [] };
+/** Mirrors the server's REAL_PEOPLE setting, for the server-is-gone fallback. */
+let realPeople = 'allow';
 let lastInteraction = Date.now();
 let inFlight = false;
 let hasWalked = false;
@@ -60,7 +63,8 @@ fetch('/data/fallback.json')
 fetch('/api/status')
   .then((res) => res.json())
   .then((status) => {
-    if (status.mock) setPill('demo mode - no API key');
+    realPeople = status.realPeople ?? 'allow';
+    if (status.offline) setPill('offline mode');
   })
   .catch(() => {});
 
@@ -94,13 +98,14 @@ async function requestStructure(prompt) {
     const data = await res.json();
 
     if (data.source === 'model') setPill(null);
-    else if (data.note === 'api unavailable') setPill('offline - using saved exhibits');
+    else if (data.note === 'api unavailable') setPill('offline - built on this laptop');
 
     return normalizeStructure(data.structure);
   } catch {
-    // Network gone, server down, or too slow. The pack covers all three.
-    setPill('offline - using saved exhibits');
-    return normalizeStructure(jitter(pickFromPack(pack, prompt)));
+    // The server itself is gone. Everything needed to build is already in the
+    // browser, so the booth keeps working even then.
+    setPill('offline - built in this browser');
+    return normalizeStructure(buildFromPrompt(pack, prompt, { anonymise: realPeople !== 'allow' }));
   } finally {
     clearTimeout(timer);
   }

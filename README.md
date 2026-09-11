@@ -2,20 +2,25 @@
 
 A club fair booth demo. A walkable 2D amusement park with twelve empty plots.
 You walk a character down the midway, stand in a plot, type *"a statue of my
-chemistry teacher"*, and the model returns a small JSON structure that drops in
-and stands there.
+chemistry teacher"*, and a small JSON structure drops in and stands there.
+
+It runs either way: with an API key Haiku builds the structure, and with no
+network at all it is built on the laptop. Offline is a first-class mode here,
+not a degraded one — see **Running with no network**.
 
 The park never resets. By the end of the day it is a row of everything the crowd
 built, and unlike a single pile, twelve separate plots stay readable all
 afternoon.
 
 ```
-npm install
-npm start            # http://localhost:3000
+npm install          # the only step that needs internet - do it at home
+npm run offline      # http://localhost:3000
 ```
 
-No API key yet? It still runs. Without one it serves from a 16-structure offline
-pack, which is also exactly what happens when the venue wifi dies mid-fair.
+**If your school network blocks things, run `npm run offline` and don't think
+about it again.** Nothing touches the network: exhibits are built on the laptop,
+and the page loads zero external resources. `npm start` is the same thing with
+live generation when a key is present.
 
 For live generation, copy `.env.example` to `.env` and add an
 `ANTHROPIC_API_KEY`.
@@ -37,7 +42,9 @@ not, and people can still find the thing they made.
 **Constrained output is the moderation.** The model is handed exactly one tool
 and forced to call it. It cannot write a sentence — the whole output channel is
 a few clamped numbers per part, an enum, hex colours, and a 30-character label.
-A student typing something crude gets a grey block.
+A student typing something crude gets a grey block. Offline the constraint is
+tighter still: there is no model in the loop at all, and the only text that can
+reach a sign is the student's own words, after the blocklist.
 
 That last point is the one worth understanding before you run this in front of a
 dean, so it's spelled out below.
@@ -105,15 +112,53 @@ school booth, and the cost is one boring exhibit.
 
 ---
 
+## Running with no network
+
+School networks block things, so offline is a first-class mode rather than a
+degraded one. `OFFLINE=1` (or `npm run offline`) and nothing ever leaves the
+laptop.
+
+**What you get offline.** Two builders, picked per prompt:
+
+- **The pack** — sixteen hand-authored exhibits. A bare noun it recognises
+  ("a ferris wheel", "a dragon") gets the good hand-made version.
+- **The generator** (`public/js/offline.js`) — everything else. It reads a
+  subject, a size and a material out of the words and assembles an archetype
+  from them, so "a giant purple dragon" is a large purple creature and "a
+  bowling ball made of jello" is light, pink, and absurdly bouncy. Anything with
+  an adjective goes here, because the pack has one ferris wheel in one colour
+  and the generator understands "purple".
+
+It is not a model and doesn't pretend to be — it's a parameterised shape library
+with a vocabulary of about 200 words. But the sign says what you typed, the
+thing is a different thing than your friend's, and that is most of what the
+booth is selling. A word it doesn't know still builds a distinct object rather
+than the same grey blob every time, which is the difference between "type
+anything" being true and being a slogan.
+
+Same prompt always builds the same exhibit, so someone who liked what they got
+can type it again to show a friend.
+
+**Cost of offline: no novelty beyond the vocabulary.** "A statue of Abraham
+Lincoln" and "a statue of my dog" build the same statue with different signs.
+With a key, Haiku actually differentiates them. If the network works, use it.
+
+**If the network is present but blocked**, a firewall usually drops traffic
+rather than refusing it, so each build hangs until the timeout. After two of
+those the server stops asking for five minutes and builds locally — so only the
+first couple are slow. Set `OFFLINE=1` to skip that entirely.
+
 ## Booth logistics
 
 - **Big external monitor or projector**, laptop as the keyboard station. The
   screen is your advertising.
-- **Assume the wifi dies.** It will. Everything needed is on the laptop:
-  Matter.js is served from `node_modules`, not a CDN, and the offline pack is
-  fetched once at startup and held in memory. When the network drops mid-fair,
-  the park keeps working and shows a small "offline" pill. Nobody sees an error
-  screen. Rehearse this path with `npm run mock`.
+- **`npm install` is the only step that needs internet.** Do it at home. After
+  that the laptop needs nothing: Matter.js is served from `node_modules` rather
+  than a CDN, fonts are system fonts, and the favicon is inline. A browser
+  devtools Network tab at the booth should show nothing but `localhost`.
+- **Even losing the server doesn't stop it.** If the Node process dies, the page
+  keeps building in the browser from the same code — the pack and the generator
+  both ship to the client.
 - **The preset buttons matter more than you'd think.** Roughly half of booth
   traffic won't type. Six one-tap prompts sit under the input — edit them in
   `public/index.html`.
@@ -144,7 +189,7 @@ Three guards, all in `.env`:
 | `MAX_CALLS_PER_MINUTE` | 40 | A crowd arriving at once |
 | `MAX_CALLS_PER_DAY` | 1500 | A stuck loop draining the club's credits |
 
-Past any of them the offline pack quietly takes over. The booth never stops
+Past any of them the local builder quietly takes over. The booth never stops
 working; it just stops spending.
 
 Check `/api/status` during the fair for live counts, token usage, and how much
@@ -224,7 +269,8 @@ public/
   styles.css      Big-screen typography.
   js/spec.js      The schema, the clamps, the geometry. Server AND browser.
   js/park.js      Matter.js world, plots, camera, the walking character.
-  js/pack.js      Offline keyword matching.
+  js/pack.js      Offline keyword matching against the hand-authored pack.
+  js/offline.js   The local generator: prompt -> archetype, size, material.
   js/main.js      Wiring, controls, attract mode, offline fallback.
   data/           The offline pack.
 scripts/
@@ -241,7 +287,7 @@ structure can't be clamped one way on the server and another way in the park.
 npm test
 ```
 
-22 tests, no key and no network needed. They cover the clamps (including hostile
+30 tests, no key and no network needed. They cover the clamps (including hostile
 input — nulls, NaN, fifty parts, prose in the label field), the structure
 geometry that keeps builds sitting on the ground and inside their plot, the
 blocklist in both directions, and the offline pack. Every structure in the pack
