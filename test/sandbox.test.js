@@ -22,7 +22,13 @@ import {
   STRUCTURE_MAX,
 } from '../public/js/spec.js';
 import { screen, REDACTED_STRUCTURE } from '../server/moderation.js';
-import { buildFromPrompt, readPrompt, ATTRACT_PROMPTS } from '../public/js/offline.js';
+import {
+  buildFromPrompt,
+  buildNonsenseBlock,
+  looksLikeNonsense,
+  readPrompt,
+  ATTRACT_PROMPTS,
+} from '../public/js/offline.js';
 
 const part = (over = {}) => ({
   shape: 'box',
@@ -358,4 +364,57 @@ test('offline labels use the typed words, or nothing at all when anonymising', (
   const anon = buildFromPrompt('a statue of Mr Whitfield', { anonymise: true });
   assert.ok(!anon.label.toLowerCase().includes('whitfield'), `leaked: ${anon.label}`);
   assert.ok(anon.label.length > 0);
+});
+
+/* ---------- words that are not words ---------- */
+
+test('keyboard mashing is recognised as not being words', () => {
+  const mashes = [
+    'zzzqqq', 'asdfghjkl', 'qwerty', 'jkjkjkjk', 'aaaaaa', 'xd', 'hjkl',
+    '12345', '?!?!', 'a zxcvbnm', 'sdfsdfsdf', 'mmm', 'a big zzzqqq',
+  ];
+  for (const mash of mashes) {
+    assert.equal(looksLikeNonsense(mash), true, `should be nonsense: ${mash}`);
+  }
+});
+
+test('real words are never called nonsense, vocabulary or not', () => {
+  // The false positive is the expensive one: it means mocking a visitor for
+  // typing correctly. Half of these are deliberately outside the vocabulary.
+  const words = [
+    'a dragon', 'skibidi toilet', 'a giant purple statue', 'a school bus',
+    'charlie kirk', 'a helicopter', 'a trampoline', 'an octopus wearing a hat',
+    'a lighthouse', 'the eiffel tower', 'a submarine', 'lengths', 'a pineapple',
+    'rhythm', 'a quesadilla', 'mount everest', 'a xylophone',
+  ];
+  for (const word of words) {
+    assert.equal(looksLikeNonsense(word), false, `should be a word: ${word}`);
+  }
+});
+
+test('an empty prompt is not nonsense - it has its own path', () => {
+  assert.equal(looksLikeNonsense(''), false);
+  assert.equal(looksLikeNonsense('   '), false);
+  assert.equal(looksLikeNonsense(null), false);
+});
+
+test('the nonsense block survives the schema and stands on the ground', () => {
+  const block = normalizeStructure(buildNonsenseBlock('zzzqqq'));
+
+  assert.equal(block.label, 'zzzqqq', 'the typed text is what goes on the face');
+  assert.ok(block.parts.length >= 1 && block.parts.length <= MAX_PARTS);
+  // Part 0 is the screen; world.js textures that one and nothing else.
+  assert.equal(block.parts[0].shape, 'box');
+
+  const bounds = structureBounds(block);
+  assert.ok(bounds.width <= STRUCTURE_MAX.width + 0.01, `too wide: ${bounds.width}`);
+  assert.ok(bounds.height <= STRUCTURE_MAX.height + 0.01, `too tall: ${bounds.height}`);
+  assert.ok(Math.abs(bounds.minY) < 0.01, `floating or buried: ${bounds.minY}`);
+});
+
+test('the block face keeps the meme proportions', () => {
+  // 1024x689 of caption stretched onto a square would look like a mistake.
+  const face = normalizeStructure(buildNonsenseBlock('zzzqqq')).parts[0];
+  const ratio = face.width / face.height;
+  assert.ok(ratio > 1.35 && ratio < 1.65, `face ratio is ${ratio.toFixed(2)}`);
 });

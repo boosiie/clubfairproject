@@ -15,7 +15,7 @@
  */
 
 import { normalizeStructure } from './spec.js';
-import { buildFromPrompt, ATTRACT_PROMPTS } from './offline.js';
+import { buildFromPrompt, buildNonsenseBlock, looksLikeNonsense, ATTRACT_PROMPTS } from './offline.js';
 import { World, PLOT_COUNT } from './world.js';
 
 /** Give up on the server well before it gives up on the API and build locally. */
@@ -106,6 +106,16 @@ function setPill(text) {
 
 /* ---------- building ---------- */
 
+/**
+ * What to build and, for a prompt that is not words, what to print on it.
+ *
+ * The meme text rides alongside the structure rather than inside it. The
+ * structure is the model's channel to the screen and every field in it is
+ * clamped by the schema; keeping this out of there means no model response can
+ * ever ask the park to print something.
+ *
+ * @returns {Promise<{structure: object, meme: string|null}>}
+ */
 async function requestStructure(prompt) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -123,12 +133,19 @@ async function requestStructure(prompt) {
     if (data.source === 'model') setPill(null);
     else if (data.note === 'api unavailable') setPill('offline - built on this laptop');
 
-    return normalizeStructure(data.structure);
+    return { structure: normalizeStructure(data.structure), meme: data.meme ?? null };
   } catch {
     // The server itself is gone. Everything needed to build is already in the
-    // browser, so the booth keeps working even then.
+    // browser, so the booth keeps working even then - including this.
     setPill('offline - built in this browser');
-    return normalizeStructure(buildFromPrompt(prompt, { anonymise: realPeople !== 'allow' }));
+    if (looksLikeNonsense(prompt)) {
+      const block = normalizeStructure(buildNonsenseBlock(prompt));
+      return { structure: block, meme: block.label };
+    }
+    return {
+      structure: normalizeStructure(buildFromPrompt(prompt, { anonymise: realPeople !== 'allow' })),
+      meme: null,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -149,7 +166,8 @@ async function build(prompt) {
   els.go.disabled = true;
 
   try {
-    const exhibit = world.build(await requestStructure(prompt), plot);
+    const { structure, meme } = await requestStructure(prompt);
+    const exhibit = world.build(structure, plot, { meme });
     // Turn to watch it land, or in first person you would never see it.
     if (exhibit) world.faceTowards(exhibit.group.position.x, exhibit.group.position.z);
     refreshCounters();

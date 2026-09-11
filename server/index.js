@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 import { normalizeStructure } from '../public/js/spec.js';
-import { buildFromPrompt } from '../public/js/offline.js';
+import { buildFromPrompt, buildNonsenseBlock, looksLikeNonsense } from '../public/js/offline.js';
 import { screen, REDACTED_STRUCTURE, ANONYMOUS_LABEL, blocklistSize } from './moderation.js';
 import { generateStructure, describeError, isConfigured, MODEL } from './claude.js';
 
@@ -95,6 +95,7 @@ const stats = {
   modelCalls: 0,
   fallbacks: 0,
   blocked: 0,
+  nonsense: 0,
   anonymised: 0,
   errors: 0,
   inputTokens: 0,
@@ -186,7 +187,16 @@ app.post('/api/build', async (req, res) => {
     return res.json({ structure: normalizeStructure(REDACTED_STRUCTURE), source: 'blocked' });
   }
 
-  // 2. Offline, no key, rate limited, out of budget, or the API has been
+  // 2. Not words. Answering a keyboard mash with a shape would be pretending we
+  //    understood it; the block says so instead. Done here, before the API, so
+  //    "asdfgh" costs nothing and comes back instantly.
+  if (looksLikeNonsense(prompt)) {
+    stats.nonsense += 1;
+    const block = normalizeStructure(buildNonsenseBlock(prompt));
+    return res.json({ structure: block, source: 'nonsense', meme: block.label });
+  }
+
+  // 3. Offline, no key, rate limited, out of budget, or the API has been
   //    failing: build it here. The response shape is identical, so the park
   //    cannot tell the difference.
   const budget = budgetAvailable(clientId);
@@ -213,14 +223,14 @@ app.post('/api/build', async (req, res) => {
 
     const normalized = normalizeStructure(structure);
 
-    // 3. Screen the label the model chose. The schema means this is the only
+    // 4. Screen the label the model chose. The schema means this is the only
     //    free text that reaches the screen, so this is the whole output surface.
     if (screen(normalized.label).blocked) {
       stats.blocked += 1;
       return res.json({ structure: normalizeStructure(REDACTED_STRUCTURE), source: 'blocked' });
     }
 
-    // 4. Real-person policy. The model classified the subject in the same tool
+    // 5. Real-person policy. The model classified the subject in the same tool
     //    call, which is more robust than trying to keep a list of names.
     if (normalized.subject === 'real_person' && REAL_PEOPLE !== 'allow') {
       stats.anonymised += 1;

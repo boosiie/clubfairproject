@@ -51,11 +51,32 @@ const EYE_HEIGHT = 1.62;
 /** Just short of straight up and down - past vertical the world flips over. */
 const MAX_PITCH = 1.45;
 
-const GROUND_COLOR = 0x5ea45f;
-const ROAD_COLOR = 0x8d8a7e;
-const PAD_COLOR = 0x76b871;
-const KERB_COLOR = 0xc3cf9a;
-const SKY_COLOR = 0x9fd0ef;
+/**
+ * The floor is white with a thin dark grid, the way a Wii menu is: the point of
+ * the grid is not decoration, it is scale. A plain white plane has no size and
+ * no landmarks, so walking forwards on one looks exactly like standing still.
+ * Everything else is kept pale so the exhibits are the only colour in the park.
+ */
+const GRID_METRES = 2;
+const FLOOR_SIZE = 240;
+const FLOOR_COLOR = 0xffffff;
+const GRID_INK = '#141821';
+/** What the floor bounces back up. Near-white, because the floor is. */
+const BOUNCE_COLOR = 0xeef1f6;
+/**
+ * Everything on the floor is PAINTED on, never built up.
+ *
+ * The road and the plots used to be raised slabs, and standing anywhere on the
+ * boulevard they covered the bottom two thirds of the screen - so the grid,
+ * which is the only thing telling you that you are moving, was visible only as
+ * a smudge near the horizon. Flat markings read exactly as well and leave the
+ * floor showing everywhere, which is also what a Wii court actually looks like.
+ */
+const ROAD_LINE = 0xa9bacd;
+const PLOT_LINE = 0x3f4d68;
+/** Width of a painted stripe, in metres. */
+const LINE_WIDTH = 0.35;
+const SKY_COLOR = 0xbfdcf2;
 
 export class World {
   constructor(container, options = {}) {
@@ -103,10 +124,24 @@ export class World {
   /* ---------- scene ---------- */
 
   buildLighting() {
-    const sky = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, 1.5);
+    /*
+     * These two numbers are an exposure setting, not a taste one.
+     *
+     * three.js divides light intensity by pi (the Lambert BRDF), so the old
+     * 1.5/1.6 pair summed to about 0.65 at a floor facing straight up - every
+     * surface in the park was rendering at two thirds of the colour it was
+     * given. On green you cannot see that. On white you can: it came out
+     * #d2dadd, a blue-grey. At 1.7/1.9 the sum lands just under 1, which means
+     * a white floor is white and every exhibit is the colour it was built in.
+     *
+     * The sky term is near-white rather than sky blue for the same reason - it
+     * is the floor's main light source, and a blue light on a white floor makes
+     * a blue floor. The blue in the scene comes from the background and the fog.
+     */
+    const sky = new THREE.HemisphereLight(0xf4f9ff, BOUNCE_COLOR, 1.7);
     this.scene.add(sky);
 
-    const sun = new THREE.DirectionalLight(0xfff6e6, 1.6);
+    const sun = new THREE.DirectionalLight(0xfff8ee, 1.9);
     sun.position.set(24, 38, 18);
     sun.castShadow = true;
     // 1024 is plenty at this art style and keeps a school laptop with integrated
@@ -124,21 +159,26 @@ export class World {
   buildGround() {
     const length = PER_SIDE * PLOT_PITCH + 30;
 
-    const grass = new THREE.Mesh(
-      new THREE.PlaneGeometry(220, 220),
-      new THREE.MeshLambertMaterial({ color: GROUND_COLOR }),
-    );
-    grass.rotation.x = -Math.PI / 2;
-    grass.receiveShadow = true;
-    this.scene.add(grass);
+    const grid = makeGridTexture();
+    // The plane is centred on the origin and FLOOR_SIZE divides exactly by the
+    // cell size, so tile edges land on even metres and a line runs through 0.
+    grid.repeat.set(FLOOR_SIZE / GRID_METRES, FLOOR_SIZE / GRID_METRES);
+    // Without this a thin dark line on white turns to grey mush a few metres
+    // out, and the whole floor shimmers as you walk.
+    grid.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
-    const road = new THREE.Mesh(
-      new THREE.BoxGeometry(ROAD_HALF * 2, 0.08, length),
-      new THREE.MeshLambertMaterial({ color: ROAD_COLOR }),
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE),
+      new THREE.MeshLambertMaterial({ color: FLOOR_COLOR, map: grid }),
     );
-    road.position.y = 0.04;
-    road.receiveShadow = true;
-    this.scene.add(road);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+
+    // The boulevard is two painted edge lines, the way a court is marked out.
+    for (const side of [-1, 1]) {
+      this.scene.add(stripe(LINE_WIDTH, length, side * ROAD_HALF, 0, ROAD_LINE));
+    }
   }
 
   /** Where the centre of a plot sits in world space. */
@@ -155,23 +195,14 @@ export class World {
     for (let i = 0; i < PLOT_COUNT; i++) {
       const at = this.plotPosition(i);
 
-      const pad = new THREE.Mesh(
-        new THREE.BoxGeometry(PLOT_SIZE, 0.16, PLOT_SIZE),
-        new THREE.MeshLambertMaterial({ color: PAD_COLOR }),
-      );
-      pad.position.set(at.x, 0.08, at.z);
-      pad.receiveShadow = true;
-      this.scene.add(pad);
-
-      // A kerb makes the plot read as a distinct lot from across the park, and
-      // is low enough to walk over without a jump.
-      const kerb = new THREE.Mesh(
-        new THREE.BoxGeometry(PLOT_SIZE + 0.5, 0.3, PLOT_SIZE + 0.5),
-        new THREE.MeshLambertMaterial({ color: KERB_COLOR }),
-      );
-      kerb.position.set(at.x, 0.12, at.z);
-      this.scene.add(kerb);
-      pad.position.y = 0.28;
+      // The plot is a painted square. Four bars rather than a filled slab, so
+      // the grid runs straight through it and exhibits sit on the floor itself
+      // instead of on a shelf a hand's width above it.
+      const span = PLOT_SIZE + LINE_WIDTH;
+      for (const side of [-1, 1]) {
+        this.scene.add(stripe(span, LINE_WIDTH, at.x, at.z + side * PLOT_SIZE / 2, PLOT_LINE));
+        this.scene.add(stripe(LINE_WIDTH, span, at.x + side * PLOT_SIZE / 2, at.z, PLOT_LINE));
+      }
 
       const sign = this.makeSign(i + 1);
       sign.position.set(
@@ -188,7 +219,7 @@ export class World {
       );
       ring.rotation.x = -Math.PI / 2;
       ring.rotation.z = Math.PI / 4;
-      ring.position.set(at.x, 0.4, at.z);
+      ring.position.set(at.x, 0.05, at.z);
       ring.visible = false;
       this.scene.add(ring);
       this.plotMarkers.push({ ring, sign });
@@ -300,23 +331,27 @@ export class World {
    *
    * @param {object} structure - already through normalizeStructure()
    * @param {number} plotIndex
+   * @param {{meme?: string|null}} [options] - meme text prints the block face,
+   *   for a prompt with no word in it. Passed as an option rather than carried
+   *   on the structure so the model has no way to ask for one.
    */
-  build(structure, plotIndex) {
+  build(structure, plotIndex, options = {}) {
     if (plotIndex < 0 || plotIndex >= PLOT_COUNT) return null;
 
+    const meme = options.meme || null;
     const fitted = fitStructure(structure, STRUCTURE_MAX);
     const bounds = structureBounds(fitted);
     const at = this.plotPosition(plotIndex);
 
     const group = new THREE.Group();
-    for (const part of fitted.parts) {
-      const mesh = new THREE.Mesh(geometryFor(part), new THREE.MeshLambertMaterial({ color: part.color }));
+    fitted.parts.forEach((part, index) => {
+      const mesh = new THREE.Mesh(geometryFor(part), materialsFor(part, index === 0 ? meme : null));
       mesh.position.set(part.offsetX, part.offsetY, part.offsetZ);
       mesh.rotation.set(part.rotationX, part.rotationY, part.rotationZ);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
-    }
+    });
 
     // Spread repeat builds around the plot instead of stacking them on one spot.
     const taken = this.contentsOf(plotIndex).length;
@@ -324,8 +359,16 @@ export class World {
     const nudge = [[0, 0], [-spread, spread], [spread, -spread], [spread, spread]][taken % 4];
 
     group.position.set(at.x + nudge[0], DROP_HEIGHT, at.z + nudge[1]);
-    group.rotation.y = Math.random() * Math.PI * 2;
+    // A random spin is fine for a statue and useless for something you have to
+    // read, so the block turns its face to whoever typed it. Local +Z becomes
+    // (sin y, 0, cos y), which is why the arguments are this way round.
+    group.rotation.y = meme
+      ? Math.atan2(this.player.position.x - group.position.x, this.player.position.z - group.position.z)
+      : Math.random() * Math.PI * 2;
     this.scene.add(group);
+
+    const sin = Math.abs(Math.sin(group.rotation.y));
+    const cos = Math.abs(Math.cos(group.rotation.y));
 
     const exhibit = {
       group,
@@ -334,8 +377,11 @@ export class World {
       bounciness: fitted.bounciness,
       // The world-space box, used for walking into things. Recomputed when it
       // lands, since the drop changes its height.
-      halfWidth: bounds.width / 2,
-      halfDepth: bounds.depth / 2,
+      // The footprint is measured before the group is turned, so turn it too.
+      // Collision is axis-aligned, and anything much wider than it is deep - a
+      // bus, a wall, the block - is walk-straight-through without this.
+      halfWidth: (bounds.width * cos + bounds.depth * sin) / 2,
+      halfDepth: (bounds.width * sin + bounds.depth * cos) / 2,
       restY: 0,
       velocityY: 0,
       landed: false,
@@ -358,10 +404,13 @@ export class World {
       live[i].removing = true;
       live[i].removeAt = this.clock.elapsedTime + FADE_SECONDS;
       live[i].group.traverse((node) => {
-        if (node.isMesh) {
-          node.material = node.material.clone();
-          node.material.transparent = true;
-        }
+        if (!node.isMesh) return;
+        // Cloned so fading this copy does not fade every other exhibit sharing
+        // the material. The block face is an array of six, so handle both.
+        const fade = (material) => Object.assign(material.clone(), { transparent: true });
+        node.material = Array.isArray(node.material)
+          ? node.material.map(fade)
+          : fade(node.material);
       });
     }
   }
@@ -416,7 +465,7 @@ export class World {
         const remaining = Math.max(0, exhibit.removeAt - now);
         const opacity = remaining / FADE_SECONDS;
         exhibit.group.traverse((node) => {
-          if (node.isMesh) node.material.opacity = opacity;
+          if (node.isMesh) for (const material of eachMaterial(node)) material.opacity = opacity;
         });
         if (remaining <= 0) {
           disposeGroup(exhibit.group);
@@ -688,6 +737,192 @@ function makeBlockAvatar() {
   return group;
 }
 
+/**
+ * One grid cell, drawn once and tiled across the floor.
+ *
+ * The lines go on two edges only. Drawing all four would double every interior
+ * line where tiles meet, giving a grid of alternating thick and thin lines that
+ * looks like a rendering bug.
+ */
+function makeGridTexture() {
+  // 256 rather than 128 for the mipmaps: the line has to survive being shrunk
+  // to a couple of pixels twenty metres out, and a low-resolution tile fades to
+  // nothing at exactly the distance where the grid is doing the most work.
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+
+  // 10px of a 256px cell spanning two metres is a line about 8cm wide, which is
+  // the width of a real painted floor line and reads at every distance.
+  ctx.fillStyle = GRID_INK;
+  ctx.globalAlpha = 0.8;
+  ctx.fillRect(0, 0, size, 10);
+  ctx.fillRect(0, 0, 10, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/* ---------- the block for a prompt that is not words ---------- */
+
+const SOB_COUNT = 5;
+
+/**
+ * A sobbing emoji, drawn rather than typed.
+ *
+ * Canvas renders an emoji character in whatever colour font the machine has,
+ * and on a machine without one you get an empty box. Five empty boxes is not a
+ * joke, it is a bug the booth cannot recover from - and this has to work on a
+ * school laptop with no network. Thirty lines of arcs looks the same anywhere.
+ */
+function drawSob(ctx, cx, cy, size) {
+  const r = size / 2;
+
+  const skin = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+  skin.addColorStop(0, '#ffe04d');
+  skin.addColorStop(1, '#f2a900');
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eyes squeezed shut: two arcs bowing upwards.
+  ctx.strokeStyle = '#6d4a00';
+  ctx.lineWidth = Math.max(2, r * 0.14);
+  ctx.lineCap = 'round';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(cx + side * r * 0.42, cy + r * 0.04, r * 0.3, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+  }
+
+  // Tears, straight down from under each eye and off the chin.
+  ctx.fillStyle = '#48a5ee';
+  for (const side of [-1, 1]) {
+    const x = cx + side * r * 0.42;
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.12, cy + r * 0.14);
+    ctx.lineTo(x + r * 0.12, cy + r * 0.14);
+    ctx.lineTo(x + r * 0.08, cy + r * 1.02);
+    ctx.quadraticCurveTo(x, cy + r * 1.24, x - r * 0.08, cy + r * 1.02);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Wide open wailing mouth, last so the tears pass behind it.
+  ctx.fillStyle = '#7d2f18';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.44, r * 0.33, r * 0.27, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e0665c';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.6, r * 0.19, r * 0.11, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * The face of the block: what they typed, then a row of sobbing emoji, in the
+ * white-with-a-dark-outline every meme caption has ever been set in.
+ */
+function makeMemeTexture(text) {
+  const width = 1024;
+  const height = 689;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  const back = ctx.createLinearGradient(0, 0, width * 0.4, height);
+  back.addColorStop(0, '#5b6058');
+  back.addColorStop(1, '#33372f');
+  ctx.fillStyle = back;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  const room = width * 0.9;
+  /** Gap before the first face, and the pitch of the row - both in font units. */
+  const GAP = 0.4;
+  const STEP = 0.92;
+
+  const setFont = (px) => {
+    ctx.font = `700 ${px}px ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif`;
+    return ctx.measureText(text).width;
+  };
+
+  const caption = (px, x, y) => {
+    setFont(px);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = px * 0.14;
+    ctx.strokeStyle = '#141414';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, x, y);
+  };
+
+  const row = (size, y) => {
+    const pitch = size * 1.06;
+    const start = (width - pitch * SOB_COUNT) / 2;
+    for (let i = 0; i < SOB_COUNT; i++) drawSob(ctx, start + pitch * (i + 0.5), y, size);
+  };
+
+  // First choice is the original layout: one line, text then faces.
+  let font = Math.round(height * 0.27);
+  let textWidth = setFont(font);
+  for (; font > 16; font -= 2) {
+    textWidth = setFont(font);
+    if (textWidth + font * (GAP + SOB_COUNT * STEP) <= room) break;
+  }
+
+  // A short mash - which is nearly all of them - keeps the one-line setting of
+  // the original. The threshold is where the faces stop reading as faces.
+  if (font * STEP >= height * 0.11) {
+    const left = (width - (textWidth + font * (GAP + SOB_COUNT * STEP))) / 2;
+    caption(font, left, height * 0.5);
+    const pitch = font * STEP;
+    const first = left + textWidth + font * GAP;
+    for (let i = 0; i < SOB_COUNT; i++) drawSob(ctx, first + pitch * (i + 0.5), height * 0.5, font * 0.88);
+  } else {
+    // The text is long enough that keeping it on one line with the faces
+    // shrinks them to specks - and the faces are the joke, not the text. So
+    // they keep their size and the words take the line above.
+    let stacked = Math.round(height * 0.22);
+    for (; stacked > 16 && setFont(stacked) > room; stacked -= 2);
+    caption(stacked, (width - setFont(stacked)) / 2, height * 0.36);
+    row(Math.min(height * 0.24, (room / SOB_COUNT) * 0.94), height * 0.68);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/**
+ * Materials for one part. `meme` turns it into the block face.
+ *
+ * BoxGeometry's face order is +X, -X, +Y, -Y, +Z, -Z. The caption goes on the
+ * two large faces only - stretched across a 0.5m edge it would be unreadable -
+ * and build() turns the block to face whoever typed it.
+ */
+function materialsFor(part, meme) {
+  const plain = new THREE.MeshLambertMaterial({ color: part.color });
+  if (!meme || part.shape !== 'box') return plain;
+
+  // Unlit on purpose. A lit face is only as bright as whichever way the block
+  // happened to land relative to the sun, and a caption you have to walk round
+  // the block to read is not a joke, it is a shrug. Basic material always reads.
+  const faced = new THREE.MeshBasicMaterial({ map: makeMemeTexture(meme) });
+  return [plain, plain, plain, plain, faced, faced];
+}
+
 /** A canvas texture of a short string, for the plot number boards. */
 function makeTextTexture(text, ink, background) {
   const canvas = document.createElement('canvas');
@@ -708,12 +943,40 @@ function makeTextTexture(text, ink, background) {
   return texture;
 }
 
+/**
+ * A stripe painted on the floor.
+ *
+ * A flat box rather than a plane: 2cm thick sits clear of the floor without
+ * z-fighting, and is far too low to be something you can trip over or have to
+ * jump. It casts no shadow, because paint does not.
+ */
+function stripe(width, depth, x, z, color) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(width, 0.02, depth),
+    new THREE.MeshLambertMaterial({ color }),
+  );
+  mesh.position.set(x, 0.011, z);
+  // Takes shadow but casts none, so a line running under an exhibit darkens
+  // with the floor around it instead of glowing through the shadow.
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** A mesh's materials, whether it has one or a set of six. */
+function eachMaterial(mesh) {
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
 function disposeGroup(group) {
   group.traverse((node) => {
     if (!node.isMesh) return;
     node.geometry.dispose();
-    if (Array.isArray(node.material)) node.material.forEach((m) => m.dispose());
-    else node.material.dispose();
+    for (const material of eachMaterial(node)) {
+      // The block face owns a canvas texture. Without this every unreadable
+      // prompt leaks a megabyte of GPU memory for the life of the booth.
+      material.map?.dispose();
+      material.dispose();
+    }
   });
 }
 

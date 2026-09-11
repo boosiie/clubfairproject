@@ -101,6 +101,8 @@ Five layers, in order:
    prompt *before* the API call, once on the returned label after. Blocked input
    still builds — a plain grey block labelled "redacted". No error, no scolding,
    no reaction. A boring grey block is the correct punishment.
+   Gibberish is screened straight after, and gets the block described below —
+   still no API call, still no error.
 4. **The real-person policy** — see below.
 5. **Rendering.** The label reaches the page through `textContent`, never
    `innerHTML`.
@@ -173,6 +175,36 @@ can type it again to show a friend.
 Lincoln" and "a statue of my dog" build the same statue with different signs.
 With a key, Haiku actually differentiates them. If the network works, use it.
 
+### Words that are not words
+
+A keyboard mash doesn't get a shape. It gets a block with the typed text on it
+and five sobbing emoji.
+
+This exists because the honest answer to `zzzqqq` is not a vague blob. A blob
+says *"here is your thing"* and the visitor half-believes the machine understood
+them; the block says *"that is not a word"*, which is both true and funnier. It
+is also free — a prompt routed here never reaches the model.
+
+The test is in `looksLikeNonsense()` in `public/js/offline.js`, and it is not a
+dictionary. A dictionary would be a megabyte to ship, would still be wrong about
+"skibidi", and would be wrong in the expensive direction. Instead it tests the
+*shape* of the string, on the handful of properties that separate English from a
+keyboard mash: real words have vowels, don't run six consonants together, don't
+repeat one letter or one letter pair over and over, and don't walk along a row
+of keys. A word in the generator's own vocabulary is always a word.
+
+**It is deliberately biased toward "that's a word."** A false positive means
+mocking a visitor for typing correctly, which at a booth is much worse than
+building a vague blob for something we didn't recognise. So `a helicopter`
+builds normally even though it isn't in the vocabulary, and an invented word
+that *looks* like a word — `flurbwizzle` — builds a blob rather than the block.
+Only `zzzqqq`, `asdfghjkl`, `jkjkjkjk` and friends get the joke. If you want it
+to fire more often, the thresholds are all in one function.
+
+Nothing about the block goes through the schema. The typed text reaches it as a
+render option, not as a field on the structure, so no model response can ever
+ask the park to print something.
+
 **If the network is present but blocked**, a firewall usually drops traffic
 rather than refusing it, so each build hangs until the timeout. After two of
 those the server stops asking for five minutes and builds locally — so only the
@@ -244,6 +276,21 @@ limits sprawls into the neighbour's plot. Every structure is scaled as a whole
 (so proportions survive) and lifted so its lowest point rests on the ground.
 Rotated parts are measured by their swept box on whichever axes they turn, or a
 wheel laid on its side is measured as if it were still flat.
+
+**The floor is doing a job, not decorating.** It's white with a thin dark grid,
+like a Wii menu. A plain white plane has no scale and no landmarks, so walking
+forwards on one looks exactly like standing still. Everything on it — the
+boulevard, the plot squares — is painted flat rather than built up: raised slabs
+covered the bottom two thirds of the screen and left the grid visible only as a
+smudge near the horizon.
+
+**Light intensity in three.js is divided by pi.** The lights were tuned against
+a green floor at 1.5/1.6, which sums to about 0.65 at a surface facing straight
+up — every colour in the park was rendering at two thirds of the value it was
+given. You cannot see that on green. On white you can: it came out `#d2dadd`.
+1.7/1.9 sums to just under 1, so a white floor is white and an exhibit is the
+colour it was built in. The sky term is near-white too, because it is the
+floor's main light source and a blue light on a white floor makes a blue floor.
 
 **Exhibits must have depth.** The whole point of 3D is walking round the back,
 and a flat cutout looks fine from the road and absurd from the side. There is a

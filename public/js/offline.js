@@ -183,6 +183,92 @@ function findSubject(tokens) {
   return { archetype: 'blob', matched: null };
 }
 
+/* ---------- words that are not words ---------- */
+
+/** Words that modify a subject rather than being one. */
+const MODIFIERS = new Set([
+  ...SIZES.flatMap(([, words]) => words),
+  ...Object.keys(MATERIALS), ...Object.keys(COLORS), ...Object.keys(GREYS),
+  'rainbow',
+]);
+
+/** Everything the generator knows. A whitelist for the shape test below. */
+const KNOWN_WORDS = new Set([...MODIFIERS, ...WORD_TO_ARCHETYPE.keys()]);
+
+/** Glue words. A prompt made only of these has no subject either way. */
+const FILLER = new Set([
+  'a', 'an', 'the', 'of', 'with', 'and', 'or', 'in', 'on', 'at', 'to', 'for',
+  'my', 'your', 'his', 'her', 'their', 'its', 'some', 'that', 'this', 'it',
+  'is', 'are', 'was', 'were', 'be', 'made', 'out', 'from', 'by', 'like',
+  'please', 'make', 'build', 'add', 'put', 'me', 'i', 'want', 'can', 'you',
+]);
+
+const KEY_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+
+/** Four or more letters walked along one keyboard row - "asdf", "qwer". */
+function mashesAKeyboardRow(word) {
+  let run = 1;
+  for (let i = 1; i < word.length; i++) {
+    const adjacent = KEY_ROWS.some((row) => {
+      const a = row.indexOf(word[i - 1]);
+      const b = row.indexOf(word[i]);
+      return a >= 0 && b >= 0 && Math.abs(a - b) === 1;
+    });
+    run = adjacent ? run + 1 : 1;
+    if (run >= 4) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this look like a word somebody could have meant?
+ *
+ * Not a dictionary. A dictionary would be a megabyte we would have to ship, it
+ * would still be wrong about "skibidi", and it would be wrong in the expensive
+ * direction. So this tests the SHAPE of the string instead, on the handful of
+ * properties that separate English from a keyboard mash: real words have
+ * vowels, do not run six consonants together, do not repeat one letter or one
+ * letter pair over and over, and do not walk along a row of keys.
+ *
+ * Deliberately generous. Calling a real word gibberish means mocking a visitor
+ * for typing correctly, which is far worse at a booth than building a vague
+ * blob for something we did not recognise. When it is unsure, it says "word".
+ */
+function looksLikeWord(word) {
+  if (KNOWN_WORDS.has(word) || KNOWN_WORDS.has(stem(word))) return true;
+  if (word.length < 3) return false;
+
+  const vowels = (word.match(/[aeiouy]/g) ?? []).length;
+  if (vowels === 0) return false;                 // "zzzqqq"
+  if (vowels / word.length > 0.8) return false;   // "aeiou"
+  if (/[^aeiouy]{6,}/.test(word)) return false;   // "sdfghjkl"
+  if (/(.)\1{2,}/.test(word)) return false;       // "aaaaah"
+  if (/(..)\1{2,}/.test(word)) return false;      // "jkjkjk"
+  return !mashesAKeyboardRow(word);
+}
+
+/**
+ * Is the whole prompt gibberish?
+ *
+ * True only when BOTH we recognise no subject AND nothing left in the prompt
+ * even looks like a word. "a helicopter" is not in our vocabulary but is
+ * obviously a word, so it builds normally; "zzzqqq" gets the block.
+ */
+export function looksLikeNonsense(prompt) {
+  const text = String(prompt ?? '').trim();
+  if (!text) return false;
+
+  const tokens = tokenize(text);
+  // Digits or punctuation only - there is no word in here to miss.
+  if (!tokens.length) return true;
+
+  if (findSubject(tokens.map(stem)).matched) return false;
+
+  const content = tokens.filter((word) => !FILLER.has(word) && !MODIFIERS.has(word));
+  if (!content.length) return false;
+  return content.every((word) => !looksLikeWord(word));
+}
+
 export function readPrompt(prompt) {
   const tokens = tokenize(prompt).map(stem);
   const set = new Set(tokens);
@@ -452,6 +538,29 @@ export function buildOffline(prompt) {
         : 'object',
     bounciness: read.material?.bounce ?? 0.2,
     parts: build(scale, palette, rng),
+  };
+}
+
+/**
+ * The exhibit for a prompt that is not words: a block with the typed text on it.
+ *
+ * Deliberately NOT a blob. A blob is the machine pretending it understood, and
+ * the visitor half-believes it; the block says "that is not a word", which is
+ * both true and the funnier answer. It is also free - a prompt routed here
+ * never reaches the model at all.
+ *
+ * Part 0 is the screen. world.js textures it and leaves the rest alone.
+ */
+export function buildNonsenseBlock(prompt) {
+  return {
+    label: prompt,
+    subject: 'object',
+    bounciness: 0.15,
+    parts: [
+      part('box', 4.4, 2.96, 0.5, 0, 2.1, 0, '#15171c'),
+      // A plinth, so it stands like an exhibit instead of floating.
+      part('box', 4.9, 0.5, 1.1, 0, 0.25, 0, '#3b4250'),
+    ],
   };
 }
 
