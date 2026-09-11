@@ -285,14 +285,28 @@ bottom two thirds of the screen and left the grid visible only as a smudge near
 the horizon. The markings are thin, pale and unlit, so they read as lines on a
 diagram rather than paint on tarmac; wide dark ones read as kerbs.
 
-**The park is meant to feel like the inside of a cloud service** — haze in every
-direction, data drifting up through the air, racks of something enormous just
-out of focus at the edges. All of it is flat colour, fog and one sprite: a
-gradient sky dome, ~500 drifting points, and a ring of unlit boxes and drums
-(a stack of drums being what a database has looked like in every diagram ever
-drawn). There isn't a single shader, because it has to hold 60fps on a school
-laptop with integrated graphics. The fog colour and the bottom of the sky
-gradient are the same, which is what hides the edge where the floor runs out.
+**The park stands inside a server hall**, and the thing that makes it read as
+one is *regularity*. The first attempt used towers at random heights and random
+spacings, and it came out looking like a foggy Manhattan — because that is
+exactly what a skyline is. Hardware is the opposite: identical units on a fixed
+pitch with aisles between the rows. Same geometry, same height, same gaps.
+Nothing about the hall is random now — every rack is the same rack, and the drum
+stacks land on a fixed interval rather than wherever. That one change did more
+than anything else in the scene.
+
+The rest is haze and two textures: a gradient sky dome, ~500 points drifting up
+through the air and wrapping back to the floor, one rack face (bays, vents and
+status lights) shared by every cabinet, and one drum texture whose dark end
+bands give each drum in a stack its rim — without them three cylinders read as
+a single smooth pillar. A stack of drums is, after all, what a database has
+looked like in every diagram since about 1975.
+
+It is ~300 racks in **one draw call**: `InstancedMesh`, which is the difference
+between this being free and this being why a school laptop drops to 20fps.
+There isn't a single shader in the scene. The fog colour and the bottom of the
+sky gradient are the same value, and the fog goes fully opaque at 118 while the
+rack field stops at 120 — so the hall dissolves into haze instead of ending on
+a visible last row, and you never see the edge where the floor runs out.
 
 **Light intensity in three.js is divided by pi.** The lights were tuned against
 a green floor at 1.5/1.6, which sums to about 0.65 at a surface facing straight
